@@ -1,0 +1,3 @@
+# Installer writes the real configuration here. Never commit it.
+/local.php
+/local.php.*

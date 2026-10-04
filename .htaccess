@@ -1,0 +1,15 @@
+# Recommended production document root is /public. These rules are defense-in-depth
+# for shared-hosting setups that accidentally expose the repository root.
+Options -Indexes -MultiViews
+RewriteEngine On
+
+# Keep application internals and repository metadata inaccessible if the root is exposed.
+RewriteRule ^(?:app|config|database|storage|views|bin|\.git|\.svn|node_modules|vendor)(?:/|$) - [F,L,NC]
+RewriteRule ^(?:README\.md|\.gitignore)$ - [F,L,NC]
+
+# Compatibility for the root index.php shim. Production should serve /public directly.
+RewriteRule ^assets/(.*)$ public/assets/$1 [L]
+RewriteRule ^favicon\.svg$ public/favicon.svg [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]

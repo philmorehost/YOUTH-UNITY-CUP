@@ -1,0 +1,10 @@
+# Per-install credentials and generated runtime state
+/config/local.php
+/config/local.php.*
+/storage/*
+!/storage/.gitignore
+
+# Common editor / operating-system files
+.DS_Store
+.idea/
+.vscode/
