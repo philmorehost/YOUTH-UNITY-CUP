@@ -5,13 +5,15 @@
 /** @var array{type:string,message:string}|null $flash */
 $oldForm = is_array($oldForm ?? null) ? $oldForm : [];
 $oldQuantities = is_array($oldForm['quantity'] ?? null) ? $oldForm['quantity'] : [];
+$demoMode = ($siteMode ?? 'production') === 'demo';
+$checkoutReady = !empty($payHubConfigured) && !$demoMode;
 ?>
 <section class="public-content-wrap shop-content-wrap">
     <div class="public-hero shop-hero">
         <div class="eyebrow"><span class="eyebrow-line"></span>YOUTH UNITY CUP · OFFICIAL SHOP</div>
         <h1>Wear the <em>unity.</em></h1>
         <p>Official Youth Unity Cup merchandise, managed by the tournament team. Secure payment is handled by PayHub.</p>
-        <span class="public-hero-stamp">2026<br><small>MUSHIN · LAGOS</small></span>
+        <span class="public-hero-stamp"><?= yuc_e(yuc_current_year((string) ($appTimezone ?? 'Africa/Lagos'))) ?><br><small>MUSHIN · LAGOS</small></span>
     </div>
     <nav class="public-section-nav" aria-label="Tournament pages">
         <a href="/">Home</a><a href="/teams">Teams</a><a href="/fixtures">Fixtures</a><a href="/results">Results</a><a href="/venues">Venues</a><a href="/registration">Registration</a><a href="/shop" class="active">Official shop</a>
@@ -26,8 +28,9 @@ $oldQuantities = is_array($oldForm['quantity'] ?? null) ? $oldForm['quantity'] :
     <?php endif; ?>
 
     <section class="panel shop-panel">
-        <div class="panel-topline"><div><div class="panel-kicker">OFFICIAL MERCHANDISE</div><h2>Shop the collection</h2></div><span class="readiness-pill <?= $payHubConfigured ? 'is-ready' : 'is-warning' ?>"><span></span><?= $payHubConfigured ? 'PAYHUB CHECKOUT' : 'PAYMENTS NOT CONFIGURED' ?></span></div>
+        <div class="panel-topline"><div><div class="panel-kicker">OFFICIAL MERCHANDISE</div><h2>Shop the collection</h2></div><span class="readiness-pill <?= $checkoutReady ? 'is-ready' : 'is-warning' ?>"><span></span><?= $demoMode ? 'DEMO CHECKOUT PAUSED' : ($checkoutReady ? 'PAYHUB CHECKOUT' : 'PAYMENTS NOT CONFIGURED') ?></span></div>
         <p class="panel-intro">Prices are set by Youth Unity Cup administrators. Your chosen items and current price are checked again before inventory is reserved.</p>
+        <?php if ($demoMode): ?><div class="demo-checkout-note"><strong>Preview only — checkout is paused.</strong><span>The product catalogue remains unchanged during the tournament demo. No order or payment will be created.</span></div><?php endif; ?>
 
         <?php if ($products === []): ?>
             <div class="public-empty shop-empty"><span>◈</span><strong>The official collection is being prepared.</strong><p>Check back soon or contact the tournament team for an update.</p></div>
@@ -40,7 +43,7 @@ $oldQuantities = is_array($oldForm['quantity'] ?? null) ? $oldForm['quantity'] :
                         <article class="shop-product-card">
                             <div class="shop-product-mark" aria-hidden="true">Y</div>
                             <div class="shop-product-copy"><span class="shop-product-sku">SKU · <?= yuc_e($product['sku']) ?></span><h3><?= yuc_e($product['name']) ?></h3><p><?= yuc_e($product['description'] !== '' ? $product['description'] : 'Official Youth Unity Cup merchandise.') ?></p></div>
-                            <div class="shop-product-bottom"><strong class="shop-product-price">₦<?= number_format((int) $product['price_kobo'] / 100, 2) ?></strong><label for="shop-quantity-<?= $id ?>">Quantity</label><input id="shop-quantity-<?= $id ?>" name="quantity[<?= $id ?>]" type="number" min="0" max="<?= min(20, $stock) ?>" step="1" value="<?= yuc_e($oldQuantities[$id] ?? '0') ?>" aria-describedby="shop-stock-<?= $id ?>"><small id="shop-stock-<?= $id ?>">Up to <?= min(20, $stock) ?> available</small></div>
+                            <div class="shop-product-bottom"><strong class="shop-product-price">₦<?= number_format((int) $product['price_kobo'] / 100, 2) ?></strong><label for="shop-quantity-<?= $id ?>">Quantity</label><input id="shop-quantity-<?= $id ?>" name="quantity[<?= $id ?>]" type="number" min="0" max="<?= min(20, $stock) ?>" step="1" value="<?= yuc_e($oldQuantities[$id] ?? '0') ?>" aria-describedby="shop-stock-<?= $id ?>" <?= $demoMode ? 'disabled' : '' ?>><small id="shop-stock-<?= $id ?>">Up to <?= min(20, $stock) ?> available</small></div>
                         </article>
                     <?php endforeach; ?>
                 </div>
@@ -55,7 +58,7 @@ $oldQuantities = is_array($oldForm['quantity'] ?? null) ? $oldForm['quantity'] :
                     </div>
                 </div>
                 <?php if (!$payHubConfigured): ?><p class="shop-payment-warning">Online checkout is temporarily unavailable while secure payment configuration is completed. Please contact the tournament team for an update.</p><?php endif; ?>
-                <div class="shop-checkout-actions"><span>Payment amount is confirmed by the server from the current catalog.</span><button class="button button-primary" type="submit" <?= !$payHubConfigured ? 'disabled' : '' ?>>Continue to PayHub <span aria-hidden="true">→</span></button></div>
+                <div class="shop-checkout-actions"><span>Payment amount is confirmed by the server from the current catalog.</span><button class="button button-primary" type="submit" <?= !$checkoutReady ? 'disabled' : '' ?>><?= $demoMode ? 'Checkout paused' : 'Continue to PayHub' ?> <span aria-hidden="true">→</span></button></div>
             </form>
         <?php endif; ?>
     </section>

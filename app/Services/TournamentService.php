@@ -33,8 +33,274 @@ final class TournamentService
     public function publicTeams(): array
     {
         return $this->pdo->query(
-            "SELECT id, name, zone, group_name FROM teams WHERE status='active' ORDER BY zone, name LIMIT 200"
+            "SELECT t.id, t.name, t.zone, t.group_name, COUNT(p.id) AS player_count "
+            . "FROM teams t LEFT JOIN team_players p ON p.team_id=t.id AND p.status='active' "
+            . "WHERE t.status='active' GROUP BY t.id, t.name, t.zone, t.group_name "
+            . "ORDER BY COALESCE(NULLIF(t.group_name, ''), 'Z'), t.name LIMIT 200"
         )->fetchAll();
+    }
+
+    /** @return list<array{name:string,teams:list<array<string,mixed>>}> */
+    public function publicTeamGroups(): array
+    {
+        $teams = $this->publicTeams();
+        if ($teams === []) {
+            return [];
+        }
+
+        $stats = [];
+        $teamGroupsById = [];
+        foreach ($teams as $team) {
+            $teamId = (int) $team['id'];
+            $stats[$teamId] = [
+                'played' => 0, 'won' => 0, 'drawn' => 0, 'lost' => 0,
+                'goals_for' => 0, 'goals_against' => 0, 'goal_difference' => 0, 'points' => 0,
+            ];
+            $teamGroupsById[$teamId] = strtoupper(trim((string) ($team['group_name'] ?? '')));
+        }
+
+        $matches = $this->pdo->query(
+            "SELECT f.home_team_id, f.away_team_id, f.home_score, f.away_score, f.stage "
+            . "FROM fixtures f INNER JOIN teams ht ON ht.id=f.home_team_id AND ht.status='active' "
+            . "INNER JOIN teams at ON at.id=f.away_team_id AND at.status='active' "
+            . "WHERE f.status='completed' AND f.home_score IS NOT NULL AND f.away_score IS NOT NULL"
+        )->fetchAll();
+        foreach ($matches as $match) {
+            $homeId = (int) $match['home_team_id'];
+            $awayId = (int) $match['away_team_id'];
+            if (!isset($stats[$homeId], $stats[$awayId])
+                || !str_contains(mb_strtolower((string) $match['stage']), 'group')
+                || $teamGroupsById[$homeId] === ''
+                || $teamGroupsById[$homeId] !== $teamGroupsById[$awayId]) {
+                continue;
+            }
+            $homeScore = (int) $match['home_score'];
+            $awayScore = (int) $match['away_score'];
+            $stats[$homeId]['played']++;
+            $stats[$awayId]['played']++;
+            $stats[$homeId]['goals_for'] += $homeScore;
+            $stats[$homeId]['goals_against'] += $awayScore;
+            $stats[$awayId]['goals_for'] += $awayScore;
+            $stats[$awayId]['goals_against'] += $homeScore;
+            if ($homeScore > $awayScore) {
+                $stats[$homeId]['won']++;
+                $stats[$homeId]['points'] += 3;
+                $stats[$awayId]['lost']++;
+            } elseif ($homeScore < $awayScore) {
+                $stats[$awayId]['won']++;
+                $stats[$awayId]['points'] += 3;
+                $stats[$homeId]['lost']++;
+            } else {
+                $stats[$homeId]['drawn']++;
+                $stats[$awayId]['drawn']++;
+                $stats[$homeId]['points']++;
+                $stats[$awayId]['points']++;
+            }
+        }
+
+        $groups = [];
+        foreach ($teams as $team) {
+            $groupName = trim((string) ($team['group_name'] ?? ''));
+            $groupName = $groupName !== '' ? $groupName : 'Unassigned';
+            $team['played'] = $stats[(int) $team['id']]['played'];
+            $team['won'] = $stats[(int) $team['id']]['won'];
+            $team['drawn'] = $stats[(int) $team['id']]['drawn'];
+            $team['lost'] = $stats[(int) $team['id']]['lost'];
+            $team['goals_for'] = $stats[(int) $team['id']]['goals_for'];
+            $team['goals_against'] = $stats[(int) $team['id']]['goals_against'];
+            $team['goal_difference'] = $team['goals_for'] - $team['goals_against'];
+            $team['points'] = $stats[(int) $team['id']]['points'];
+            $groups[$groupName][] = $team;
+        }
+
+        uksort($groups, static function (string $left, string $right): int {
+            if ($left === 'Unassigned') {
+                return 1;
+            }
+            if ($right === 'Unassigned') {
+                return -1;
+            }
+            return strnatcasecmp($left, $right);
+        });
+        foreach ($groups as &$groupTeams) {
+            usort($groupTeams, static function (array $left, array $right): int {
+                return ($right['points'] <=> $left['points'])
+                    ?: ($right['goal_difference'] <=> $left['goal_difference'])
+                    ?: ($right['goals_for'] <=> $left['goals_for'])
+                    ?: strcasecmp((string) $left['name'], (string) $right['name']);
+            });
+        }
+        unset($groupTeams);
+
+        $result = [];
+        foreach ($groups as $name => $groupTeams) {
+            $result[] = ['name' => (string) $name, 'teams' => $groupTeams];
+        }
+        return $result;
+    }
+
+    /** @return array<string,mixed>|null */
+    public function findPublicTeam(int $id): ?array
+    {
+        $statement = $this->pdo->prepare(
+            "SELECT t.id, t.name, t.zone, t.group_name, t.notes, COUNT(p.id) AS player_count "
+            . "FROM teams t LEFT JOIN team_players p ON p.team_id=t.id AND p.status='active' "
+            . "WHERE t.id=:id AND t.status='active' "
+            . "GROUP BY t.id, t.name, t.zone, t.group_name, t.notes LIMIT 1"
+        );
+        $statement->execute(['id' => $id]);
+        $team = $statement->fetch();
+        return is_array($team) ? $team : null;
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function publicTeamPlayers(int $teamId): array
+    {
+        $statement = $this->pdo->prepare(
+            "SELECT id, full_name, jersey_number, position, age, hometown, bio, photo_url, avatar_variant "
+            . "FROM team_players WHERE team_id=:team_id AND status='active' "
+            . "ORDER BY jersey_number IS NULL, jersey_number, full_name LIMIT 40"
+        );
+        $statement->execute(['team_id' => $teamId]);
+        return $statement->fetchAll();
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function players(): array
+    {
+        return $this->pdo->query(
+            'SELECT p.id, p.team_id, p.full_name, p.jersey_number, p.position, p.age, p.hometown, p.bio, '
+            . 'p.photo_url, p.avatar_variant, p.status, p.created_at, t.name AS team_name, t.zone AS team_zone '
+            . 'FROM team_players p INNER JOIN teams t ON t.id=p.team_id '
+            . 'ORDER BY t.name, p.jersey_number IS NULL, p.jersey_number, p.full_name LIMIT 1000'
+        )->fetchAll();
+    }
+
+    /** @return array<string,mixed>|null */
+    public function findPlayer(int $id): ?array
+    {
+        $statement = $this->pdo->prepare('SELECT * FROM team_players WHERE id=:id LIMIT 1');
+        $statement->execute(['id' => $id]);
+        $player = $statement->fetch();
+        return is_array($player) ? $player : null;
+    }
+
+    /** @param array<string,mixed> $data */
+    public function savePlayer(array $data, int $adminId): void
+    {
+        $id = filter_var(is_scalar($data['id'] ?? 0) ? $data['id'] : null, FILTER_VALIDATE_INT);
+        $teamId = filter_var(is_scalar($data['team_id'] ?? null) ? $data['team_id'] : null, FILTER_VALIDATE_INT);
+        if ($id === false || $id < 0 || $teamId === false || $teamId < 1) {
+            throw new InvalidArgumentException('Choose a valid team and player record.');
+        }
+        $fullName = $this->text($data['full_name'] ?? '', 120, 'Player name');
+        $position = $this->text($data['position'] ?? '', 40, 'Playing position');
+        $jerseyInput = $data['jersey_number'] ?? '';
+        $jerseyNumber = null;
+        if (is_scalar($jerseyInput) && trim((string) $jerseyInput) !== '') {
+            $jerseyNumber = filter_var($jerseyInput, FILTER_VALIDATE_INT);
+            if ($jerseyNumber === false || $jerseyNumber < 1 || $jerseyNumber > 99) {
+                throw new InvalidArgumentException('Jersey number must be from 1 to 99.');
+            }
+        }
+        $ageInput = $data['age'] ?? '';
+        $age = null;
+        if (is_scalar($ageInput) && trim((string) $ageInput) !== '') {
+            $age = filter_var($ageInput, FILTER_VALIDATE_INT);
+            if ($age === false || $age < 10 || $age > 19) {
+                throw new InvalidArgumentException('Player age must be from 10 to 19.');
+            }
+        }
+        $hometownInput = $data['hometown'] ?? '';
+        $bioInput = $data['bio'] ?? '';
+        if (!is_scalar($hometownInput) || !is_scalar($bioInput)) {
+            throw new InvalidArgumentException('Player hometown and profile details must be text.');
+        }
+        $hometown = trim((string) $hometownInput);
+        $bio = trim((string) $bioInput);
+        if (mb_strlen($hometown) > 80 || mb_strlen($bio) > 350) {
+            throw new InvalidArgumentException('Hometown is limited to 80 characters and player details to 350 characters.');
+        }
+        $photoUrl = $this->validatePlayerPhotoUrl($data['photo_url'] ?? '');
+        $avatarInput = $data['avatar_variant'] ?? 1;
+        $avatarVariant = filter_var(is_scalar($avatarInput) ? $avatarInput : null, FILTER_VALIDATE_INT);
+        if ($avatarVariant === false || $avatarVariant < 1 || $avatarVariant > 8) {
+            throw new InvalidArgumentException('Choose a player portrait style from 1 to 8.');
+        }
+        $status = $this->oneOf($data['status'] ?? 'active', ['active', 'inactive'], 'Player status');
+
+        $teamCheck = $this->pdo->prepare('SELECT id FROM teams WHERE id=:id LIMIT 1');
+        $teamCheck->execute(['id' => $teamId]);
+        if ($teamCheck->fetchColumn() === false) {
+            throw new InvalidArgumentException('The selected team no longer exists.');
+        }
+        if ($id > 0 && $this->findPlayer($id) === null) {
+            throw new InvalidArgumentException('That player profile no longer exists.');
+        }
+
+        $values = [
+            'team_id' => $teamId,
+            'full_name' => $fullName,
+            'jersey_number' => $jerseyNumber,
+            'position' => $position,
+            'age' => $age,
+            'hometown' => $hometown,
+            'bio' => $bio,
+            'photo_url' => $photoUrl,
+            'avatar_variant' => $avatarVariant,
+            'status' => $status,
+        ];
+        if ($id > 0) {
+            $values['id'] = $id;
+            $statement = $this->pdo->prepare(
+                'UPDATE team_players SET team_id=:team_id, full_name=:full_name, jersey_number=:jersey_number, '
+                . 'position=:position, age=:age, hometown=:hometown, bio=:bio, photo_url=:photo_url, '
+                . 'avatar_variant=:avatar_variant, status=:status WHERE id=:id'
+            );
+            $statement->execute($values);
+            $this->audit($adminId, 'tournament.player_updated', 'Updated player profile for ' . $fullName);
+            return;
+        }
+
+        $statement = $this->pdo->prepare(
+            'INSERT INTO team_players (team_id, full_name, jersey_number, position, age, hometown, bio, photo_url, avatar_variant, status, created_at, updated_at) '
+            . 'VALUES (:team_id, :full_name, :jersey_number, :position, :age, :hometown, :bio, :photo_url, :avatar_variant, :status, UTC_TIMESTAMP(), UTC_TIMESTAMP())'
+        );
+        $statement->execute($values);
+        $this->audit($adminId, 'tournament.player_created', 'Created player profile for ' . $fullName);
+    }
+
+    public function deletePlayer(int $id, int $adminId): void
+    {
+        $player = $this->findPlayer($id);
+        if ($player === null) {
+            throw new InvalidArgumentException('That player profile no longer exists.');
+        }
+        $this->pdo->prepare('DELETE FROM team_players WHERE id=:id')->execute(['id' => $id]);
+        $this->audit($adminId, 'tournament.player_deleted', 'Deleted player profile for ' . (string) $player['full_name']);
+    }
+
+    private function validatePlayerPhotoUrl(mixed $value): string
+    {
+        if (!is_scalar($value)) {
+            throw new InvalidArgumentException('Player headshot URL must be a secure HTTPS address.');
+        }
+        $url = trim((string) $value);
+        if ($url === '') {
+            return '';
+        }
+        $parts = parse_url($url);
+        if (strlen($url) > 500
+            || filter_var($url, FILTER_VALIDATE_URL) === false
+            || !is_array($parts)
+            || strtolower((string) ($parts['scheme'] ?? '')) !== 'https'
+            || !isset($parts['host'])
+            || preg_match('/^[A-Za-z0-9.-]+$/D', (string) $parts['host']) !== 1
+            || isset($parts['user'])
+            || isset($parts['pass'])) {
+            throw new InvalidArgumentException('Use a valid HTTPS image URL for the player headshot, or leave it blank for the illustrated portrait.');
+        }
+        return $url;
     }
 
     /** @return list<array<string,mixed>> */
@@ -58,7 +324,7 @@ final class TournamentService
         };
         $direction = $view === 'results' ? 'DESC' : 'ASC';
         $statement = $this->pdo->query(
-            'SELECT f.id, f.stage, f.kickoff_at, f.status, f.home_score, f.away_score, f.notes, '
+            'SELECT f.id, f.home_team_id, f.away_team_id, f.stage, f.kickoff_at, f.status, f.home_score, f.away_score, f.notes, '
             . 'ht.name AS home_team, ht.zone AS home_zone, at.name AS away_team, at.zone AS away_zone, '
             . 'v.name AS venue_name, v.zone AS venue_zone '
             . 'FROM fixtures f INNER JOIN teams ht ON ht.id = f.home_team_id '
@@ -877,9 +1143,11 @@ final class TournamentService
     public function counts(): array
     {
         $counts = [];
-        foreach (['teams', 'venues', 'fixtures', 'registrations', 'transactions'] as $table) {
+        foreach (['teams', 'team_players', 'venues', 'fixtures', 'registrations', 'transactions'] as $table) {
             $counts[$table] = (int) $this->pdo->query('SELECT COUNT(*) FROM ' . $table)->fetchColumn();
         }
+        $counts['players'] = $counts['team_players'];
+        unset($counts['team_players']);
         $counts['blocked_ips'] = (int) $this->pdo->query('SELECT COUNT(*) FROM ip_blocks WHERE blocked_until > UTC_TIMESTAMP()')->fetchColumn();
         return $counts;
     }

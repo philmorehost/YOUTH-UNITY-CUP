@@ -1,11 +1,11 @@
 # Youth Unity Cup
 
-A vanilla PHP platform for the Youth Unity Cup tournament website. The existing public-facing site and Elementor templates remain in place; clean PHP routes add the four-stage setup wizard, protected administration, MySQL-backed teams/venues/fixtures/results/registrations, a configurable official merchandise shop with PayHub checkout, site and security settings, password recovery, audit history, and an SMTP notification outbox.
+A vanilla PHP, MVC-style platform for the Youth Unity Cup tournament website. Clean routes serve a sport-inspired public site with teams, group standings, squad profiles, fixtures, results, venues and registration, plus protected administration, a configurable official shop with PayHub inline checkout, managed homepage hero media, site/security settings, password recovery, audit history and an SMTP notification outbox.
 
 ## Installer stages
 
 1. **Welcome & system checks** — checks PHP 8.1+, required extensions, and protected folder permissions; verifies the submitted project key server-side against the PMH License Manager API over HTTPS.
-2. **Database & schema** — connects to an existing MySQL database and creates the tables with static, non-destructive `CREATE TABLE IF NOT EXISTS` statements. It seeds the ten venue-zone names already in the site; team names and match schedules remain admin-managed rather than being invented. Application queries use PDO prepared statements.
+2. **Database & schema** — connects to an existing MySQL database and creates the tables with static, non-destructive `CREATE TABLE IF NOT EXISTS` statements. It seeds the ten venue-zone names already in the site; live team names and schedules remain admin-managed. A separate, reversible Demo mode provides a clearly labelled 16-team sample tournament. Application queries use PDO prepared statements.
 3. **Admin & email** — creates the first super-admin with PHP password hashing and optionally configures SMTP delivery.
 4. **Completion** — provides the sign-in route and a first-login checklist.
 
@@ -15,7 +15,8 @@ The verification step is intentionally transparent: the installer labels the ver
 
 - PHP 8.1 or later
 - MySQL 8.0+ or MariaDB 10.5+
-- PHP extensions: `pdo`, `pdo_mysql`, `curl`, `openssl`, `mbstring`, `json`, and `session`
+- PHP extensions: `pdo`, `pdo_mysql`, `curl`, `openssl`, `mbstring`, `json`, `session`, `fileinfo`, and GD with WebP support
+- For hero uploads, set `upload_max_filesize` to at least `26M`, `post_max_size` above that (for example `28M`), and a memory limit suitable for GD image processing
 - HTTPS for production
 - `config/` and `storage/` writable by the PHP process, preferably on a filesystem accessible only to the application account
 
@@ -37,8 +38,8 @@ Open `http://localhost:8080/`. The first request redirects to `/install`. Licens
 2. Enable HTTPS and the Apache rewrite module if deploying with the supplied `public/.htaccess`.
 3. Create an empty MySQL/MariaDB database and a least-privilege database account.
 4. Visit `/install`, complete each stage, and sign in at `/admin/login`.
-5. For an already-installed site upgrading from the original installer schema, back up the database and run `php /absolute/path/to/YOUTH-UNITY-CUP/bin/migrate-schema.php` once with the configured database account before using the new tournament or shop routes. The migration uses non-destructive `CREATE TABLE IF NOT EXISTS` statements, adds missing transaction recipient/provider/archive columns and the unique provider-reference index, creates the shop catalog/order tables, and adds order verification, inventory-reservation, and archive fields when absent.
-6. Configure the PayHub secret and webhook/return URLs as described in **PayHub shop setup** below before opening `/shop` for real orders.
+5. For an already-installed site upgrading from an earlier schema, back up the database and run `php /absolute/path/to/YOUTH-UNITY-CUP/bin/migrate-schema.php` once with the configured database account before using the new roster or demo-mode controls. The migration uses non-destructive `CREATE TABLE IF NOT EXISTS` statements, adds missing transaction/provider/archive and shop-verification fields, and creates the team-player roster and protected site-mode snapshot tables. It does not drop existing live data.
+6. Configure the PayHub public and secret keys and webhook endpoint as described in **PayHub shop setup** below before opening `/shop` for real orders.
 7. Confirm SMTP delivery from the dashboard's **Send a test notification** action. Without SMTP, mail remains in the database outbox and is not silently discarded.
 8. Schedule the outbox worker (for example once per minute), running as the same OS account that serves PHP, to retry temporary SMTP failures:
 
@@ -51,36 +52,48 @@ The worker processes up to 50 queued notifications per run. Each message is pers
 ## PayHub shop setup
 
 1. Create products, set NGN prices, and enter available stock under **Admin → Shop products**. Product names, SKU, unit price, and quantity are revalidated server-side; order lines retain price/name snapshots.
-2. In **Admin → Settings → PayHub shop payments**, enter the PayHub secret key from the merchant dashboard. It is written only to the protected `config/local.php`, is never rendered into a page or JavaScript, and a blank field keeps the existing value. Use the remove-key checkbox to disable new checkout.
-3. In the PayHub merchant dashboard, register the HTTPS webhook endpoint `https://<your-domain>/payments/payhub/webhook`. PayHub signs the raw JSON body with HMAC-SHA256 in `X-Payhub-Signature`; the application validates this before asking PayHub's verify endpoint for the authoritative transaction record.
-4. If the PayHub dashboard supports a browser return/callback URL, set it to `https://<your-domain>/shop/return`. The page accepts the PayHub `ref`/`reference` query value or the current browser's recent order session. Customers can also return to the shop and use **Check your recent order status**.
-5. Orders reserve stock for 20 minutes. Expired or administratively cancelled unpaid orders release the reservation. An order is marked paid only after server-side verification confirms the exact expected kobo amount and `NGN` currency; fulfillment remains an administrator action. Late payments, mismatches, and payments after a reservation was closed are held in `paid_needs_review` for an administrator. For a late payment whose stock was released, the order cannot be approved for processing until the required stock can be reserved again.
+2. In **Admin → Settings → PayHub shop payments**, enter both the PayHub **public** key and **secret** key from the merchant dashboard. The secret is saved only in protected `config/local.php` and never reaches a browser; the public key is delivered only to the inline-checkout page. Blank fields keep saved values; use the separate remove-key controls to clear either key. Both keys are required to open new inline checkouts.
+3. Register the HTTPS webhook endpoint `https://<your-domain>/payments/payhub/webhook` in the PayHub merchant dashboard. PayHub specifies `X-Payhub-Signature` as the HMAC-SHA256 hex digest of the exact raw JSON request body using the secret key. The endpoint caps payloads, verifies the raw-body signature before JSON parsing, maps only the signed reference to a local order, and then calls PayHub's verify API. The webhook body is a notification, not payment proof.
+4. The shop loads `https://merchant.payhub.com.ng/inline.js` and opens `PayhubPop.setup` with the server-created amount in kobo, customer email, and a cryptographically random order-bound reference. The browser callback is used only to return the customer to `/shop/return`; it is never trusted as evidence of payment. The server verifies the reference, successful status, exact expected amount in kobo, and `NGN` currency with PayHub's authoritative verification endpoint before marking an order paid. Keep the HTTPS webhook enabled for customers who close the browser before returning.
+5. Orders reserve stock for 20 minutes. Expired or administratively cancelled unpaid orders release the reservation. Fulfillment remains an administrator action. Late payments, mismatches, and payments after a reservation was closed are held in `paid_needs_review`; if stock was released, an administrator must reserve stock again before approving processing.
 
-The integration uses `https://merchant.payhub.com.ng/api/transaction/initialize` and `/transaction/verify/:reference`. The PayHub secret remains server-side. No PayHub credentials or MySQL service are available in the development workspace, so live payment and real webhook delivery have not been exercised here; configure and test with your PayHub account before accepting real orders.
+The integration uses PayHub's inline checkout and `https://merchant.payhub.com.ng/api/transaction/verify/:reference`; it does not use a browser redirect as proof of payment. No PayHub credentials or MySQL service are available in the development workspace, so live payment and real webhook delivery have not been exercised here. Configure and test with your merchant account before accepting real orders.
+
+## Homepage hero management
+
+Use **Admin → Homepage hero** to choose the default sports artwork, upload an image, add a YouTube link, or upload a short MP4/WebM loop. The settings reuse the existing `system_settings` table; uploads are validated, stored under protected `storage/hero/` (outside the public document root), and served through a narrow allow-listed route with byte-range support for video playback. Images are decoded, stripped of metadata, resized when oversized, and re-encoded as WebP. Uploads are limited to 10 MB for images and 25 MB for videos. MP4 files must have fast-start metadata (`moov` atom before media data); use web-optimized, muted 1080p clips for quick mobile starts. Uploaded videos autoplay muted, loop, and play inline. YouTube links are restricted to supported YouTube hosts and use a privacy-enhanced looping embed with autoplay muted.
+
+## Demo and Production mode
+
+The Admin dashboard includes an explicit **Switch to Demo** / **Switch to Production** control. Switching to Demo takes a transactional database snapshot of the live `teams`, `team_players`, `venues`, and `fixtures` rows, then installs 16 sample teams across Groups A–D, 11 sample player profiles per team, eight sample community venues, and 24 round-robin group fixtures (including sample scores). Public pages are visibly labelled Demo; live registrations, PayHub checkout, and non-tournament admin writes are paused.
+
+Switching back to Production restores the exact saved tournament rows and IDs from the snapshot in one transaction, then removes the snapshot only after the restore succeeds. Registration, transaction/payment, shop, admin-account, login, and security-history tables are never cleared by this switch. Keep a normal database backup before deploying migrations or enabling the mode control. Install the additive schema first with `bin/migrate-schema.php` on an already-installed site.
 
 ## What is included
 
 - Clean-path front controller and a small PSR-4-style autoloader
-- `/admin/teams`, `/admin/venues`, `/admin/fixtures`, `/admin/registrations`, `/admin/transactions`, `/admin/products`, `/admin/orders`, and `/admin/security` management with public `/teams`, `/fixtures`, `/results`, `/venues`, and `/shop` pages
+- `/admin/teams`, `/admin/players`, `/admin/venues`, `/admin/fixtures`, `/admin/registrations`, `/admin/transactions`, `/admin/products`, `/admin/orders`, `/admin/homepage-hero`, and `/admin/security` management with public `/teams`, `/team?id=<id>`, `/fixtures`, `/results`, `/venues`, and `/shop` pages
+- Four-group standings, match-centred fixtures/results, and team profile pages with squad numbers, player details, secure HTTPS headshot links, and local illustrated portrait fallbacks
+- Reversible Admin → Demo/Production control: atomically snapshots and restores only tournament content (teams, player rosters, venues, fixtures). Registrations, payment/shop records, admin accounts and security history are not deleted; live registration and checkout are paused during Demo mode.
 - Instant client-side admin search across teams, venues, fixtures/scores, registrations, transactions, shop products/orders, and blocked IPs; record controls are CSRF-protected and critical deletes require confirmation
-- Safe management rules: PayHub payment data stays server-verified; admin-created shop orders use the same atomic stock reservation and PayHub initialization path as checkout, while later edits are limited to customer/fulfillment details; closed orders and manual transactions are archived with their audit/payment history retained
+- Safe management rules: PayHub payment data stays server-verified; admin-created shop orders use the same atomic stock reservation and inline checkout path as public orders, while later edits are limited to customer/fulfillment details; closed orders and manual transactions are archived with their audit/payment history retained
 - Public `/registration` application form, administrator review workflow, and status emails
-- Admin settings for site title/contact, time zone, SMTP delivery, server-side PayHub secret key, login-attempt thresholds, and IP-block duration; searchable, paginated `/admin/activity` audit history
+- Admin settings for site title/contact, time zone, SMTP delivery, server-side PayHub secret/public keys, login-attempt thresholds, and IP-block duration; searchable, paginated `/admin/activity` audit history
 - CSRF-protected, four-stage installer
-- Version/extension/permission checks
+- Version/extension/permission checks, including `fileinfo` and GD WebP support for secure hero-image uploads
 - MySQL schema for admins, login history, IP throttling, audit events, notifications, transactions, PayHub provider references, password-reset tokens, settings, shop products/orders/order-item snapshots, teams, venues, fixtures, and public registrations
 - Argon/Bcrypt-compatible PHP password hashing (`PASSWORD_DEFAULT`)
 - Session ID rotation, secure/HTTP-only/SameSite cookies, configurable temporary IP throttling, and an admin page to review or release active blocks
 - Successful login and security-threshold email alerts; audit/history records for all sign-in outcomes; one-time email password resets
 - Admin workflows to manage product SKUs, NGN prices and available stock; review shop orders, flag payment mismatches, and progress verified orders through fulfillment
-- Public `/shop` catalog and checkout; PayHub server-side initialization, authoritative status/amount/currency verification, signed webhook reconciliation, 20-minute inventory reservations, and order-status return page
+- Public `/shop` catalog and PayHub inline checkout; authoritative server-side status/reference/amount/currency verification, raw-body HMAC-signed webhook reconciliation, 20-minute inventory reservations, and order-status return page
 - Admin workflows to record non-gateway transaction events and queue notifications; public registration confirmation, review-status, and verified shop-payment notifications
 - SMTP over STARTTLS, implicit TLS, or an explicitly selected unencrypted transport; TLS peer checks are enabled
-- Public website fallback served from the existing `youth-unity-cup-site.html`
+- Responsive, full-bleed Youth Unity Cup landing page with admin-managed default/image/YouTube/video hero media, optimized private uploads and an automatically updating local-time year display
 
 ## Configuration and security notes
 
-- Never commit `config/local.php`, `storage/install.pending.json`, SMTP credentials, the PayHub secret key, database credentials, or project/license keys. These runtime paths are ignored by Git.
+- Never commit `config/local.php`, `storage/install.pending.json`, SMTP credentials, the PayHub secret key, database credentials, uploaded hero media, or project/license keys. These runtime paths are ignored by Git; PayHub's public key is not a secret but is stored in the local configuration for checkout setup.
 - Use a strong, unique administrator password of at least 12 characters. The installer never displays the password after account creation.
 - The license verification API is called server-side, with a short timeout and TLS certificate verification. API failures are shown to the installer rather than concealed.
 - SMTP secrets are stored in the protected local configuration file. Prefer an SMTP account limited to application mail and use STARTTLS or SSL/TLS.
@@ -91,4 +104,4 @@ The integration uses `https://merchant.payhub.com.ng/api/transaction/initialize`
 
 ## Validation before release
 
-Run PHP's syntax checker on every PHP file, `php tests/payhub-security.php`, `php tests/shop-template-smoke.php`, and `php tests/admin-management-smoke.php`; complete the installer against a disposable MySQL database, verify both a successful SMTP test and the queued/retry path, and exercise PayHub initialization, a signed webhook, and the payment-return verification before production deployment. Never test schema changes against the live tournament database.
+Run PHP's syntax checker on every PHP file, `php tests/payhub-security.php`, `php tests/hero-media-security.php`, `php tests/shop-template-smoke.php`, `php tests/admin-management-smoke.php`, and `php tests/public-tournament-smoke.php`; complete the installer against a disposable MySQL database, verify Demo → Production snapshot restoration on test data, test a successful SMTP message and the queued/retry path, and exercise PayHub inline checkout, a signed webhook, and server-side payment-return verification before production deployment. Test hero image/video uploads and browser playback on the production-like web server. Never test schema changes or mode switching against the live tournament database. Never test schema changes or mode switching against the live tournament database.

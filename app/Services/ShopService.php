@@ -24,9 +24,11 @@ final class ShopService
     }
 
     /** @return list<array<string,mixed>> */
-    public function publicProducts(): array
+    public function publicProducts(bool $releaseExpiredReservations = true): array
     {
-        $this->releaseExpiredReservations();
+        if ($releaseExpiredReservations) {
+            $this->releaseExpiredReservations();
+        }
         return $this->pdo->query(
             "SELECT id, sku, name, description, price_kobo, stock_quantity "
             . "FROM shop_products WHERE status='active' AND stock_quantity > 0 ORDER BY name, id LIMIT 120"
@@ -155,7 +157,7 @@ final class ShopService
      * Prices and names in the order are snapshots and cannot change with the catalog.
      *
      * @param array<string,mixed> $input
-     * @return array{reference:string,name:string,email:string,phone:string,total_kobo:int}
+     * @return array{id:int,reference:string,name:string,email:string,phone:string,total_kobo:int}
      */
     public function createOrder(array $input, string $ipAddress = 'unknown', ?int $actorId = null): array
     {
@@ -312,12 +314,49 @@ final class ShopService
         }
 
         return [
+            'id' => $orderId,
             'reference' => $reference,
             'name' => $name,
             'email' => $email,
             'phone' => $phone,
             'total_kobo' => $totalKobo,
         ];
+    }
+
+    public function attachInlinePayment(string $orderReference, string $providerReference): void
+    {
+        if (preg_match('/^YUC-S-[0-9]{6}-[A-F0-9]{10}$/D', $orderReference) !== 1
+            || preg_match('/^YUC-[A-F0-9]{32}$/D', $providerReference) !== 1) {
+            throw new RuntimeException('Inline payment reference is not valid.');
+        }
+
+        $this->pdo->beginTransaction();
+        try {
+            $statement = $this->pdo->prepare(
+                'SELECT o.id, o.status, o.transaction_id, o.reservation_expires_at '
+                . 'FROM shop_orders o WHERE o.reference=:reference LIMIT 1 FOR UPDATE'
+            );
+            $statement->execute(['reference' => $orderReference]);
+            $order = $statement->fetch();
+            if (!is_array($order) || $order['status'] !== 'pending_payment'
+                || strtotime((string) $order['reservation_expires_at'] . ' UTC') <= time()) {
+                throw new RuntimeException('The order is no longer awaiting payment.');
+            }
+            $transaction = $this->pdo->prepare(
+                'UPDATE transactions SET provider_reference=:provider_reference, updated_at=UTC_TIMESTAMP() '
+                . "WHERE id=:id AND payment_provider='payhub' AND status='pending' AND provider_reference IS NULL"
+            );
+            $transaction->execute(['provider_reference' => $providerReference, 'id' => $order['transaction_id']]);
+            if ($transaction->rowCount() !== 1) {
+                throw new RuntimeException('The inline PayHub reference could not be attached to this order.');
+            }
+            $this->pdo->commit();
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $exception;
+        }
     }
 
     public function attachPayment(string $orderReference, string $providerReference, string $checkoutUrl): void
@@ -583,9 +622,11 @@ final class ShopService
     }
 
     /** @return list<array<string,mixed>> */
-    public function orders(bool $includeArchived = false): array
+    public function orders(bool $includeArchived = false, bool $releaseExpiredReservations = true): array
     {
-        $this->releaseExpiredReservations();
+        if ($releaseExpiredReservations) {
+            $this->releaseExpiredReservations();
+        }
         $archiveFilter = $includeArchived ? ' WHERE o.archived_at IS NOT NULL' : ' WHERE o.archived_at IS NULL';
         return $this->pdo->query(
             'SELECT o.id, o.reference, o.customer_name, o.customer_email, o.customer_phone, o.fulfillment_notes, o.checkout_url, '
@@ -622,6 +663,42 @@ final class ShopService
         $items->execute(['reference' => $reference]);
         $order['items'] = $items->fetchAll();
         return $order;
+    }
+
+    /** @return array{id:int,reference:string,customer_name:string,customer_email:string,total_kobo:int,status:string,reservation_expires_at:string,provider_reference:string}|null */
+    public function inlineOrderForCustomer(string $reference): ?array
+    {
+        if (preg_match('/^YUC-S-[0-9]{6}-[A-F0-9]{10}$/D', $reference) !== 1) {
+            return null;
+        }
+        $statement = $this->pdo->prepare(
+            'SELECT o.id, o.reference, o.customer_name, o.customer_email, o.total_kobo, o.status, '
+            . 'o.reservation_expires_at, t.provider_reference '
+            . 'FROM shop_orders o INNER JOIN transactions t ON t.id=o.transaction_id '
+            . 'WHERE o.reference=:reference AND o.status=\'pending_payment\' '
+            . 'AND o.reservation_expires_at>UTC_TIMESTAMP() AND t.provider_reference IS NOT NULL LIMIT 1'
+        );
+        $statement->execute(['reference' => $reference]);
+        $order = $statement->fetch();
+        return is_array($order) ? $order : null;
+    }
+
+    /** @return array{id:int,reference:string,customer_name:string,customer_email:string,total_kobo:int,status:string,reservation_expires_at:string,provider_reference:string}|null */
+    public function inlineOrderForAdmin(int $id): ?array
+    {
+        if ($id < 1) {
+            return null;
+        }
+        $statement = $this->pdo->prepare(
+            'SELECT o.id, o.reference, o.customer_name, o.customer_email, o.total_kobo, o.status, '
+            . 'o.reservation_expires_at, t.provider_reference '
+            . 'FROM shop_orders o INNER JOIN transactions t ON t.id=o.transaction_id '
+            . 'WHERE o.id=:id AND o.archived_at IS NULL AND o.status=\'pending_payment\' '
+            . 'AND o.reservation_expires_at>UTC_TIMESTAMP() AND t.provider_reference IS NOT NULL LIMIT 1'
+        );
+        $statement->execute(['id' => $id]);
+        $order = $statement->fetch();
+        return is_array($order) ? $order : null;
     }
 
     public function localReferenceForProvider(string $providerReference): ?string

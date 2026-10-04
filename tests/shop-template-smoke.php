@@ -35,6 +35,38 @@ if (!str_contains($shop, 'Unity Cup Shirt') || !str_contains($shop, 'Continue to
     throw new RuntimeException('Public shop template did not render the catalog and checkout.');
 }
 
+$inlineCheckout = renderTemplate('shop-inline-checkout', [
+    'title' => 'Secure checkout · Youth Unity Cup',
+    'topNote' => 'PAYHUB SECURE INLINE CHECKOUT',
+    'bodyClass' => 'public-data-page shop-page',
+    'order' => [
+        'id' => 7,
+        'reference' => 'YUC-S-261004-ABCDEF1234',
+        'customer_name' => 'Sample Customer',
+        'customer_email' => 'shop@example.test',
+        'total_kobo' => 250000,
+        'status' => 'pending_payment',
+        'reservation_expires_at' => '2026-10-04 12:00:00',
+        'provider_reference' => 'YUC-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    ],
+    'payHubPublicKey' => 'pk_test_public_key_123456',
+    'returnUrl' => '/shop/return?order=YUC-S-261004-ABCDEF1234',
+    'contactEmail' => 'shop@example.test',
+    'inlinePayHubScript' => true,
+]);
+if (!str_contains($inlineCheckout, 'merchant.payhub.com.ng/inline.js')
+    || !str_contains($inlineCheckout, 'data-amount-kobo="250000"')
+    || !str_contains($inlineCheckout, 'data-public-key="pk_test_public_key_123456"')
+    || !str_contains($inlineCheckout, 'YUC-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
+    || str_contains($inlineCheckout, 'sk_live')) {
+    throw new RuntimeException('PayHub inline checkout did not safely render its public configuration.');
+}
+$inlineJs = file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
+if (!is_string($inlineJs) || !str_contains($inlineJs, 'window.location.assign(inlinePayButton.dataset.returnUrl)')
+    || !str_contains($inlineJs, 'PayHub is ready. Your payment will be confirmed by the server.')) {
+    throw new RuntimeException('Inline checkout does not return to server-side transaction verification.');
+}
+
 $order = renderTemplate('shop-order', [
     'title' => 'Payment status · Youth Unity Cup',
     'topNote' => 'SHOP ORDER STATUS',
@@ -56,6 +88,27 @@ $order = renderTemplate('shop-order', [
 ]);
 if (!str_contains($order, 'Payment confirmed') || !str_contains($order, 'YUC-S-261004-ABCDEF1234')) {
     throw new RuntimeException('Shop order status template did not render the verified order.');
+}
+
+$demoOrder = renderTemplate('shop-order', [
+    'title' => 'Payment status · Youth Unity Cup',
+    'topNote' => 'SHOP ORDER STATUS',
+    'bodyClass' => 'public-data-page shop-page',
+    'siteMode' => 'demo',
+    'order' => [
+        'reference' => 'YUC-S-261004-ABCDEF1234',
+        'status' => 'pending_payment',
+        'total_kobo' => 250000,
+        'checkout_url' => 'https://merchant.payhub.com.ng/checkout/test',
+        'items' => [],
+    ],
+    'verificationNotice' => '',
+    'contactEmail' => '',
+]);
+if (!str_contains($demoOrder, 'Live payment actions are paused in Demo mode')
+    || str_contains($demoOrder, 'Continue to PayHub checkout')
+    || str_contains($demoOrder, 'Check payment status')) {
+    throw new RuntimeException('Demo mode exposed a live PayHub checkout or verification action.');
 }
 
 $adminProducts = renderTemplate('admin-manage', [
@@ -131,6 +184,97 @@ if (!str_contains($admin, 'Shop orders') || !str_contains($admin, 'Confirm revie
     throw new RuntimeException('Admin shop order template did not render the review action.');
 }
 
+$adminPendingOrder = renderTemplate('admin-manage', [
+    'title' => 'Shop orders · Youth Unity Cup Admin',
+    'topNote' => 'ADMIN CONTROL ROOM',
+    'bodyClass' => 'admin-page',
+    'admin' => ['id' => 1, 'email' => 'admin@example.test', 'username' => 'admin'],
+    'resource' => 'orders',
+    'rows' => [[
+        'id' => 12,
+        'reference' => 'YUC-S-261004-ABCDEF1234',
+        'customer_name' => 'Sample Customer',
+        'customer_email' => 'shop@example.test',
+        'customer_phone' => '',
+        'fulfillment_notes' => '',
+        'total_kobo' => 250000,
+        'status' => 'pending_payment',
+        'reservation_expires_at' => '2026-10-04 12:00:00',
+        'provider_reference' => 'YUC-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        'provider_amount_kobo' => null,
+        'provider_currency' => null,
+        'payment_review_reason' => null,
+        'item_summary' => '1 × Unity Cup Shirt',
+        'created_at' => '2026-10-04 11:00:00',
+        'checkout_url' => null,
+        'archived_at' => null,
+    ]],
+    'formValues' => [],
+    'orderProducts' => [],
+    'teams' => [],
+    'venues' => [],
+    'settings' => [],
+    'mail' => [],
+    'payHubConfigured' => true,
+    'appTimezone' => 'UTC',
+    'flash' => null,
+    'auditTotal' => 0,
+    'auditPage' => 1,
+    'auditPages' => 1,
+    'auditSearch' => '',
+    'auditCategory' => '',
+]);
+if (!str_contains($adminPendingOrder, 'Open inline checkout') || !str_contains($adminPendingOrder, '/admin/orders?pay=12')) {
+    throw new RuntimeException('Pending orders do not expose the authenticated PayHub inline-checkout action.');
+}
+
+$demoAdminOrders = renderTemplate('admin-manage', [
+    'title' => 'Shop orders · Youth Unity Cup Admin',
+    'topNote' => 'ADMIN CONTROL ROOM',
+    'bodyClass' => 'admin-page',
+    'admin' => ['id' => 1, 'email' => 'admin@example.test', 'username' => 'admin'],
+    'resource' => 'orders',
+    'siteMode' => 'demo',
+    'rows' => [[
+        'id' => 1,
+        'reference' => 'YUC-S-261004-ABCDEF1234',
+        'customer_name' => 'Sample Customer',
+        'customer_email' => 'shop@example.test',
+        'customer_phone' => '',
+        'fulfillment_notes' => '',
+        'total_kobo' => 250000,
+        'status' => 'pending_payment',
+        'reservation_expires_at' => '2026-10-04 12:00:00',
+        'provider_reference' => 'PH_test_123',
+        'provider_amount_kobo' => null,
+        'provider_currency' => null,
+        'payment_review_reason' => null,
+        'item_summary' => '1 × Unity Cup Shirt',
+        'created_at' => '2026-10-04 11:00:00',
+        'checkout_url' => 'https://merchant.payhub.com.ng/checkout/test',
+    ]],
+    'formValues' => [],
+    'orderProducts' => [],
+    'teams' => [],
+    'venues' => [],
+    'settings' => [],
+    'mail' => [],
+    'payHubConfigured' => true,
+    'appTimezone' => 'UTC',
+    'flash' => null,
+    'auditTotal' => 0,
+    'auditPage' => 1,
+    'auditPages' => 1,
+    'auditSearch' => '',
+    'auditCategory' => '',
+]);
+if (!str_contains($demoAdminOrders, 'Shop operations are read-only in Demo mode')
+    || str_contains($demoAdminOrders, 'Open PayHub checkout')
+    || str_contains($demoAdminOrders, 'Edit details')
+    || str_contains($demoAdminOrders, 'action="/admin/orders/status"')) {
+    throw new RuntimeException('Demo mode exposed a mutable or live-payment admin order action.');
+}
+
 $settings = renderTemplate('admin-manage', [
     'title' => 'Settings · Youth Unity Cup Admin',
     'topNote' => 'ADMIN CONTROL ROOM',
@@ -155,8 +299,40 @@ $settings = renderTemplate('admin-manage', [
     'auditSearch' => '',
     'auditCategory' => '',
 ]);
-if (!str_contains($settings, 'PayHub shop payments') || !str_contains($settings, 'payhub_secret_key')) {
-    throw new RuntimeException('Admin settings template did not render PayHub credential controls.');
+if (!str_contains($settings, 'PayHub shop payments') || !str_contains($settings, 'payhub_secret_key')
+    || !str_contains($settings, 'payhub_public_key')) {
+    throw new RuntimeException('Admin settings template did not render both PayHub credential controls.');
+}
+
+$heroAdmin = renderTemplate('admin-manage', [
+    'title' => 'Homepage hero · Youth Unity Cup Admin',
+    'topNote' => 'ADMIN CONTROL ROOM',
+    'bodyClass' => 'admin-page',
+    'admin' => ['id' => 1, 'email' => 'admin@example.test', 'username' => 'admin'],
+    'resource' => 'homepage-hero',
+    'rows' => [],
+    'formValues' => [],
+    'teams' => [],
+    'venues' => [],
+    'settings' => [],
+    'heroSettings' => ['type' => 'default', 'media_file' => '', 'media_url' => '', 'youtube_id' => '', 'youtube_url' => '', 'image_alt' => 'Youth Unity Cup community football'],
+    'mail' => [],
+    'payHubConfigured' => true,
+    'appTimezone' => 'UTC',
+    'flash' => null,
+    'auditTotal' => 0,
+    'auditPage' => 1,
+    'auditPages' => 1,
+    'auditSearch' => '',
+    'auditCategory' => '',
+]);
+if (!str_contains($heroAdmin, 'action="/admin/homepage-hero/save"')
+    || !str_contains($heroAdmin, 'enctype="multipart/form-data"')
+    || !str_contains($heroAdmin, 'hero_youtube_url')
+    || !str_contains($heroAdmin, 'hero_image_file')
+    || !str_contains($heroAdmin, 'hero_video_file')
+    || !str_contains($heroAdmin, 'fast-start')) {
+    throw new RuntimeException('Admin homepage hero controls did not render the safe image, video, and YouTube options.');
 }
 
 $home = renderTemplate('public-home', [
@@ -166,11 +342,38 @@ $home = renderTemplate('public-home', [
     'description' => 'The official Youth Unity Cup home.',
     'siteTitle' => 'Youth <Unity> Cup',
 ]);
-if (!str_contains($home, 'One community.') || !str_contains($home, 'Youth &lt;Unity&gt; Cup')
+if (!str_contains($home, 'Football brings') || !str_contains($home, 'Youth &lt;Unity&gt; Cup')
     || !str_contains($home, 'name="description" content="The official Youth Unity Cup home."')
     || !str_contains($home, 'href="/fixtures"') || !str_contains($home, 'href="/registration"')
     || str_contains($home, 'THAT ROUTE ISN’T ON THE FIXTURE LIST')) {
     throw new RuntimeException('Root landing fallback template did not render the home page.');
+}
+
+$videoHome = renderTemplate('public-home', [
+    'title' => 'Youth Unity Cup · Official site',
+    'topNote' => 'OFFICIAL TOURNAMENT INFORMATION',
+    'bodyClass' => 'public-data-page',
+    'description' => 'The official Youth Unity Cup home.',
+    'siteTitle' => 'Youth Unity Cup',
+    'heroSettings' => ['type' => 'video', 'media_file' => str_repeat('a', 32) . '.mp4', 'media_url' => '/hero-media?file=' . str_repeat('a', 32) . '.mp4'],
+]);
+if (!str_contains($videoHome, '<video autoplay muted loop playsinline preload="auto"')
+    || !str_contains($videoHome, 'type="video/mp4"')
+    || !str_contains($videoHome, 'hero-media?file=')) {
+    throw new RuntimeException('Uploaded homepage video does not autoplay and loop with protected media delivery.');
+}
+
+$youtubeHome = renderTemplate('public-home', [
+    'title' => 'Youth Unity Cup · Official site',
+    'topNote' => 'OFFICIAL TOURNAMENT INFORMATION',
+    'bodyClass' => 'public-data-page',
+    'description' => 'The official Youth Unity Cup home.',
+    'siteTitle' => 'Youth Unity Cup',
+    'heroSettings' => ['type' => 'youtube', 'youtube_id' => 'dQw4w9WgXcQ', 'embed_url' => 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&loop=1&playlist=dQw4w9WgXcQ'],
+]);
+if (!str_contains($youtubeHome, 'www.youtube-nocookie.com/embed/dQw4w9WgXcQ')
+    || !str_contains($youtubeHome, 'loop=1&amp;playlist=dQw4w9WgXcQ')) {
+    throw new RuntimeException('YouTube hero does not use a privacy-enhanced, looping inline embed.');
 }
 
 fwrite(STDOUT, "Shop, admin, and home template smoke checks passed.\n");

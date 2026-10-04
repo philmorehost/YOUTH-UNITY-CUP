@@ -78,3 +78,55 @@ document.addEventListener('submit', function (event) {
         event.preventDefault();
     }
 });
+
+const inlinePayButton = document.querySelector('[data-payhub-inline-button]');
+if (inlinePayButton) {
+    const inlinePayStatus = document.querySelector('[data-payhub-inline-status]');
+    const setInlinePayStatus = (message) => {
+        if (inlinePayStatus) inlinePayStatus.textContent = message;
+    };
+
+    if (window.PayhubPop && typeof window.PayhubPop.setup === 'function') {
+        inlinePayButton.disabled = false;
+        setInlinePayStatus('PayHub is ready. Your payment will be confirmed by the server.');
+        inlinePayButton.addEventListener('click', function () {
+            if (!window.PayhubPop || typeof window.PayhubPop.setup !== 'function') {
+                setInlinePayStatus('PayHub could not be loaded. Refresh this page or contact the tournament team.');
+                return;
+            }
+
+            inlinePayButton.disabled = true;
+            setInlinePayStatus('Opening PayHub secure checkout…');
+            try {
+                const handler = window.PayhubPop.setup({
+                    key: inlinePayButton.dataset.publicKey,
+                    email: inlinePayButton.dataset.customerEmail,
+                    amount: Number.parseInt(inlinePayButton.dataset.amountKobo || '', 10),
+                    ref: inlinePayButton.dataset.providerReference,
+                    onClose: function () {
+                        inlinePayButton.disabled = false;
+                        setInlinePayStatus('Checkout closed. Your order remains reserved until the expiry time shown on the order page.');
+                    },
+                    callback: function (response) {
+                        if (!response || response.reference !== inlinePayButton.dataset.providerReference) {
+                            inlinePayButton.disabled = false;
+                            setInlinePayStatus('PayHub returned an unexpected reference. The order has not been confirmed; contact the tournament team.');
+                            return;
+                        }
+                        setInlinePayStatus('Payment response received. Verifying the transaction securely…');
+                        window.location.assign(inlinePayButton.dataset.returnUrl);
+                    },
+                });
+                if (!handler || typeof handler.openIframe !== 'function') {
+                    throw new Error('Inline checkout handler is unavailable.');
+                }
+                handler.openIframe();
+            } catch (error) {
+                inlinePayButton.disabled = false;
+                setInlinePayStatus('PayHub could not be opened. Please try again or contact the tournament team.');
+            }
+        });
+    } else {
+        setInlinePayStatus('PayHub could not be loaded. Check your connection and refresh this page to try again.');
+    }
+}

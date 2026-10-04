@@ -11,6 +11,8 @@ use PDOException;
 use Throwable;
 use Yuc\Core\ConfigStore;
 use Yuc\Core\View;
+use Yuc\Services\EnvironmentModeService;
+use Yuc\Services\HeroService;
 use Yuc\Services\PayHubClient;
 use Yuc\Services\ShopService;
 use Yuc\Services\TournamentService;
@@ -20,6 +22,8 @@ final class AdminOperationsController
     private TournamentService $tournament;
     private ShopService $shop;
     private PayHubClient $payHub;
+    private EnvironmentModeService $environmentMode;
+    private HeroService $hero;
 
     /** @param array<string,mixed> $config */
     public function __construct(private PDO $pdo, private array $config)
@@ -27,15 +31,47 @@ final class AdminOperationsController
         $this->tournament = new TournamentService($pdo, $config);
         $this->shop = new ShopService($pdo, $config);
         $this->payHub = new PayHubClient($config);
+        $this->environmentMode = new EnvironmentModeService($pdo);
+        $this->hero = new HeroService($pdo);
     }
 
     public function manage(string $resource): void
     {
         $admin = $this->requireAdmin();
-        $allowed = ['teams', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'settings', 'security', 'activity'];
+        $isDemoMode = $this->environmentMode->isDemo();
+        $allowed = ['teams', 'players', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'settings', 'homepage-hero', 'security', 'activity'];
         if (!in_array($resource, $allowed, true)) {
             http_response_code(404);
             View::render('not-found', ['title' => 'Not found · Youth Unity Cup']);
+            return;
+        }
+
+        $payInput = $_GET['pay'] ?? 0;
+        $payId = filter_var(is_scalar($payInput) ? $payInput : 0, FILTER_VALIDATE_INT) ?: 0;
+        if ($resource === 'orders' && $payId > 0) {
+            if ($isDemoMode || !$this->payHub->isInlineConfigured()) {
+                yuc_flash('error', $isDemoMode
+                    ? 'PayHub checkout is paused while the site is in Demo mode.'
+                    : 'PayHub inline checkout is not currently configured.');
+                yuc_redirect('/admin/orders');
+            }
+            $payOrder = $this->shop->inlineOrderForAdmin($payId);
+            if ($payOrder === null) {
+                yuc_flash('error', 'That order is no longer awaiting an inline payment.');
+                yuc_redirect('/admin/orders');
+            }
+            View::render('shop-inline-checkout', [
+                'title' => 'PayHub inline checkout · Youth Unity Cup Admin',
+                'topNote' => 'PAYHUB SECURE INLINE CHECKOUT',
+                'bodyClass' => 'admin-page',
+                'siteMode' => 'production',
+                'order' => $payOrder,
+                'payHubPublicKey' => $this->payHub->publicKey(),
+                'returnUrl' => '/admin/orders',
+                'contactEmail' => (string) ($this->config['app']['contact_email'] ?? ''),
+                'admin' => $admin,
+                'inlinePayHubScript' => true,
+            ]);
             return;
         }
 
@@ -48,6 +84,8 @@ final class AdminOperationsController
         $showArchived = is_scalar($archivedInput) && (string) $archivedInput === '1';
         if ($resource === 'teams') {
             $rows = $this->tournament->teams();
+        } elseif ($resource === 'players') {
+            $rows = $this->tournament->players();
         } elseif ($resource === 'venues') {
             $rows = $this->tournament->venues();
         } elseif ($resource === 'fixtures') {
@@ -59,11 +97,11 @@ final class AdminOperationsController
         } elseif ($resource === 'products') {
             $rows = $this->shop->adminProducts();
         } elseif ($resource === 'orders') {
-            $rows = $this->shop->orders($showArchived);
+            $rows = $this->shop->orders($showArchived, !$isDemoMode);
         } elseif ($resource === 'security') {
             $rows = $this->tournament->blockedIps();
         }
-        $orderProducts = $resource === 'orders' ? $this->shop->publicProducts() : [];
+        $orderProducts = $resource === 'orders' ? $this->shop->publicProducts(!$isDemoMode) : [];
         $audit = ['entries' => [], 'total' => 0, 'page' => 1, 'pages' => 1];
         $auditSearch = '';
         $auditCategory = '';
@@ -88,6 +126,8 @@ final class AdminOperationsController
                 $date = new \DateTimeImmutable((string) $formValues['kickoff_at'], new DateTimeZone('UTC'));
                 $formValues['kickoff_at'] = $date->setTimezone(new DateTimeZone($timezone))->format('Y-m-d\TH:i');
             }
+        } elseif ($editId > 0 && $resource === 'players') {
+            $formValues = $this->tournament->findPlayer($editId) ?? [];
         } elseif ($editId > 0 && $resource === 'products') {
             $formValues = $this->shop->findProduct($editId) ?? [];
         } elseif ($editId > 0 && $resource === 'registrations') {
@@ -110,8 +150,9 @@ final class AdminOperationsController
         }
 
         $settings = $resource === 'settings' ? $this->tournament->settings() : [];
+        $heroSettings = $resource === 'homepage-hero' ? $this->hero->settings() : [];
         View::render('admin-manage', [
-            'title' => ($resource === 'activity' ? 'Audit activity' : ucfirst($resource)) . ' · Youth Unity Cup Admin',
+            'title' => ($resource === 'activity' ? 'Audit activity' : ($resource === 'homepage-hero' ? 'Homepage hero' : ucfirst($resource))) . ' · Youth Unity Cup Admin',
             'topNote' => 'ADMIN CONTROL ROOM',
             'bodyClass' => 'admin-page',
             'admin' => $admin,
@@ -119,12 +160,16 @@ final class AdminOperationsController
             'rows' => $rows,
             'formValues' => $formValues,
             'orderProducts' => $orderProducts,
-            'teams' => $resource === 'fixtures' ? $this->tournament->teams(true) : [],
+            'teams' => $resource === 'fixtures' ? $this->tournament->teams(true) : ($resource === 'players' ? $this->tournament->teams() : []),
             'venues' => $resource === 'fixtures' ? $this->tournament->venues(true) : [],
+            'siteMode' => $isDemoMode ? 'demo' : 'production',
             'settings' => $settings,
+            'heroSettings' => $heroSettings,
             'appTimezone' => (string) ($this->config['app']['timezone'] ?? 'UTC'),
             'mail' => is_array($this->config['mail'] ?? null) ? $this->config['mail'] : [],
-            'payHubConfigured' => is_scalar($this->config['payments']['secret_key'] ?? null) && trim((string) $this->config['payments']['secret_key']) !== '',
+            'payHubConfigured' => $this->payHub->isInlineConfigured(),
+            'payHubSecretConfigured' => $this->payHub->isConfigured(),
+            'payHubPublicConfigured' => $this->payHub->publicKey() !== '',
             'auditTotal' => $audit['total'],
             'auditPage' => $audit['page'],
             'auditPages' => $audit['pages'],
@@ -139,11 +184,15 @@ final class AdminOperationsController
     {
         $admin = $this->requireAdmin();
         $this->verifyCsrf('/admin/' . $resource);
+        $this->guardDemoWrite($resource, '/admin/' . $resource);
         $values = $_POST;
         try {
             if ($resource === 'teams') {
                 $this->tournament->saveTeam($values, (int) $admin['id']);
                 yuc_flash('success', 'Team details saved.');
+            } elseif ($resource === 'players') {
+                $this->tournament->savePlayer($values, (int) $admin['id']);
+                yuc_flash('success', 'Player profile saved.');
             } elseif ($resource === 'venues') {
                 $this->tournament->saveVenue($values, (int) $admin['id']);
                 yuc_flash('success', 'Venue details saved.');
@@ -188,9 +237,10 @@ final class AdminOperationsController
         $admin = $this->requireAdmin();
         $redirect = '/admin/orders';
         $this->verifyCsrf($redirect);
+        $this->guardDemoWrite('orders', $redirect);
         $values = $_POST;
-        if (!$this->payHub->isConfigured()) {
-            yuc_flash('error', 'Configure PayHub before creating an order so its stock reservation and payment can be tracked safely.');
+        if (!$this->payHub->isInlineConfigured()) {
+            yuc_flash('error', 'Configure both PayHub keys before creating an order so its inline payment can be tracked safely.');
             yuc_redirect($redirect);
         }
 
@@ -198,14 +248,9 @@ final class AdminOperationsController
         try {
             $order = $this->shop->createOrder($values, yuc_client_ip(), (int) $admin['id']);
             $orderReference = (string) $order['reference'];
-            $checkout = $this->payHub->initialize([
-                'email' => $order['email'],
-                'amount_kobo' => $order['total_kobo'],
-                'name' => $order['name'],
-                'phone' => $order['phone'],
-            ]);
-            $this->shop->attachPayment($orderReference, $checkout['reference'], $checkout['authorization_url']);
-            yuc_flash('success', 'Order ' . $orderReference . ' was created. Open its PayHub checkout link from the order list; payment remains unconfirmed until PayHub verifies it.');
+            $providerReference = PayHubClient::createInlineReference();
+            $this->shop->attachInlinePayment($orderReference, $providerReference);
+            yuc_redirect('/admin/orders?pay=' . (int) $order['id']);
         } catch (InvalidArgumentException $exception) {
             $this->closeIncompleteOrder($orderReference);
             $_SESSION['_old_form'] = ['resource' => 'orders', 'values' => $this->safeOrderFormValues($values)];
@@ -214,7 +259,7 @@ final class AdminOperationsController
             $this->closeIncompleteOrder($orderReference);
             error_log('Youth Unity Cup admin shop-order creation failed (' . get_class($exception) . ').');
             $_SESSION['_old_form'] = ['resource' => 'orders', 'values' => $this->safeOrderFormValues($values)];
-            yuc_flash('error', 'The order could not be created or its PayHub checkout could not be initialized. Any stock reservation has been released. Please try again.');
+            yuc_flash('error', 'The order could not be created or its PayHub inline checkout could not be prepared. Any stock reservation has been released. Please try again.');
         }
         yuc_redirect($redirect);
     }
@@ -260,6 +305,7 @@ final class AdminOperationsController
         $admin = $this->requireAdmin();
         $redirect = '/admin/' . $resource;
         $this->verifyCsrf($redirect);
+        $this->guardDemoWrite($resource, $redirect);
         try {
             if ($resource === 'security') {
                 $ipInput = $_POST['ip_address'] ?? '';
@@ -277,6 +323,9 @@ final class AdminOperationsController
                 if ($resource === 'teams') {
                     $this->tournament->deleteTeam($id, (int) $admin['id']);
                     yuc_flash('success', 'Team deleted.');
+                } elseif ($resource === 'players') {
+                    $this->tournament->deletePlayer($id, (int) $admin['id']);
+                    yuc_flash('success', 'Player profile deleted.');
                 } elseif ($resource === 'venues') {
                     $this->tournament->deleteVenue($id, (int) $admin['id']);
                     yuc_flash('success', 'Venue deleted.');
@@ -307,6 +356,7 @@ final class AdminOperationsController
         $admin = $this->requireAdmin();
         $redirect = '/admin/' . $resource;
         $this->verifyCsrf($redirect);
+        $this->guardDemoWrite($resource, $redirect);
         $idInput = $_POST['id'] ?? null;
         $id = filter_var(is_scalar($idInput) ? $idInput : null, FILTER_VALIDATE_INT);
         if (!in_array($resource, ['transactions', 'orders'], true) || $id === false || $id < 1) {
@@ -339,6 +389,7 @@ final class AdminOperationsController
     {
         $admin = $this->requireAdmin();
         $this->verifyCsrf('/admin/security');
+        $this->guardDemoWrite('security', '/admin/security');
         try {
             $this->tournament->unblockIp((string) ($_POST['ip_address'] ?? ''), (int) $admin['id']);
             yuc_flash('success', 'The temporary IP block was removed.');
@@ -355,6 +406,7 @@ final class AdminOperationsController
     {
         $admin = $this->requireAdmin();
         $this->verifyCsrf('/admin/' . $resource);
+        $this->guardDemoWrite($resource, '/admin/' . $resource);
         $id = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT);
         if ($id === false || $id < 1) {
             yuc_flash('error', 'The selected record was not valid.');
@@ -386,10 +438,28 @@ final class AdminOperationsController
         yuc_redirect('/admin/' . $resource);
     }
 
+    public function saveHomepageHero(): void
+    {
+        $admin = $this->requireAdmin();
+        $this->verifyCsrf('/admin/homepage-hero');
+        $this->guardDemoWrite('homepage-hero', '/admin/homepage-hero');
+        try {
+            $this->hero->save($_POST, $_FILES, (int) $admin['id'], yuc_client_ip());
+            yuc_flash('success', 'The homepage hero was updated.');
+        } catch (InvalidArgumentException $exception) {
+            yuc_flash('error', $exception->getMessage());
+        } catch (Throwable $exception) {
+            error_log('Youth Unity Cup homepage hero update failed (' . get_class($exception) . ').');
+            yuc_flash('error', 'The homepage hero could not be saved. Check protected storage permissions and try again.');
+        }
+        yuc_redirect('/admin/homepage-hero');
+    }
+
     public function saveSettings(): void
     {
         $admin = $this->requireAdmin();
         $this->verifyCsrf('/admin/settings');
+        $this->guardDemoWrite('settings', '/admin/settings');
         $siteTitle = trim((string) ($_POST['site_title'] ?? ''));
         $timezone = trim((string) ($_POST['timezone'] ?? 'UTC'));
         $contactEmail = trim((string) ($_POST['contact_email'] ?? ''));
@@ -462,16 +532,26 @@ final class AdminOperationsController
             $payments = is_array($this->config['payments'] ?? null) ? $this->config['payments'] : [];
             $savedPayHubSecret = $payments['secret_key'] ?? '';
             $currentPayHubSecret = is_scalar($savedPayHubSecret) ? (string) $savedPayHubSecret : '';
-            $submittedPayHubSecret = trim((string) ($_POST['payhub_secret_key'] ?? ''));
+            $savedPayHubPublic = $payments['public_key'] ?? '';
+            $currentPayHubPublic = is_scalar($savedPayHubPublic) ? (string) $savedPayHubPublic : '';
+            $submittedPayHubSecretInput = $_POST['payhub_secret_key'] ?? '';
+            $submittedPayHubPublicInput = $_POST['payhub_public_key'] ?? '';
+            $submittedPayHubSecret = is_string($submittedPayHubSecretInput) ? trim($submittedPayHubSecretInput) : '';
+            $submittedPayHubPublic = is_string($submittedPayHubPublicInput) ? trim($submittedPayHubPublicInput) : '';
             $clearPayHubSecret = (string) ($_POST['payhub_clear_secret'] ?? '') === '1';
-            if ($submittedPayHubSecret !== ''
-                && (strlen($submittedPayHubSecret) < 8 || strlen($submittedPayHubSecret) > 512
-                    || preg_match('/^[!-~]+$/D', $submittedPayHubSecret) !== 1)) {
+            $clearPayHubPublic = (string) ($_POST['payhub_clear_public'] ?? '') === '1';
+            if ($submittedPayHubSecret !== '' && !PayHubClient::isValidKey($submittedPayHubSecret)) {
                 throw new InvalidArgumentException('Enter a valid PayHub secret key, or leave the field blank to keep the saved key.');
+            }
+            if ($submittedPayHubPublic !== '' && !PayHubClient::isValidKey($submittedPayHubPublic)) {
+                throw new InvalidArgumentException('Enter a valid PayHub public key, or leave the field blank to keep the saved key.');
             }
             $payHubSecret = $clearPayHubSecret
                 ? ''
                 : ($submittedPayHubSecret !== '' ? $submittedPayHubSecret : $currentPayHubSecret);
+            $payHubPublic = $clearPayHubPublic
+                ? ''
+                : ($submittedPayHubPublic !== '' ? $submittedPayHubPublic : $currentPayHubPublic);
 
             $settings = [
                 'site_title' => $siteTitle,
@@ -500,6 +580,7 @@ final class AdminOperationsController
             $config['payments'] = array_merge($payments, [
                 'provider' => 'payhub',
                 'secret_key' => $payHubSecret,
+                'public_key' => $payHubPublic,
             ]);
             ConfigStore::finalize($config);
             yuc_flash('success', 'Site, security, email, and PayHub payment settings have been saved.');
@@ -531,6 +612,15 @@ final class AdminOperationsController
             . 'VALUES (:user_id, :event, :description, :ip, UTC_TIMESTAMP())'
         );
         $audit->execute(['user_id' => $adminId, 'event' => 'tournament.' . $table . '_status', 'description' => 'Updated ' . $table . ' record #' . $id . ' to ' . $status, 'ip' => yuc_client_ip()]);
+    }
+
+    private function guardDemoWrite(string $resource, string $redirect): void
+    {
+        if (!$this->environmentMode->isDemo() || in_array($resource, ['teams', 'players', 'venues', 'fixtures'], true)) {
+            return;
+        }
+        yuc_flash('error', 'This production record is read-only in Demo mode. Switch to Production before changing registrations, payments, shop data, site settings, or security records.');
+        yuc_redirect($redirect);
     }
 
     /** @return array<string,mixed> */

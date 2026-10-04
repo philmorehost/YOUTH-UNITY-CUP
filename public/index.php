@@ -42,26 +42,6 @@ try {
             yuc_redirect('/install');
         });
     } else {
-        $router->get('/', static function () use ($config): void {
-            $siteFile = YUC_ROOT . '/youth-unity-cup-site.html';
-            if (is_file($siteFile) && is_readable($siteFile)) {
-                $contents = file_get_contents($siteFile);
-                if ($contents !== false) {
-                    $siteTitle = (string) ($config['app']['site_title'] ?? 'Youth Unity Cup');
-                    $contents = str_replace('<title>Youth Unity Cup</title>', '<title>' . yuc_e($siteTitle) . '</title>', $contents);
-                    echo $contents;
-                    return;
-                }
-            }
-            $siteTitle = trim((string) ($config['app']['site_title'] ?? 'Youth Unity Cup'));
-            View::render('public-home', [
-                'title' => ($siteTitle !== '' ? $siteTitle : 'Youth Unity Cup') . ' · Official site',
-                'topNote' => 'OFFICIAL TOURNAMENT INFORMATION',
-                'bodyClass' => 'public-data-page',
-                'description' => 'The official Youth Unity Cup home for tournament news, teams, fixtures, results, venues, registration, and merchandise.',
-                'siteTitle' => $siteTitle,
-            ]);
-        });
         $router->get('/install', static function (): void {
             yuc_redirect('/admin/login');
         });
@@ -98,6 +78,15 @@ try {
             }
             return $publicController;
         };
+        $router->get('/', static function () use ($getPublicController): void {
+            $getPublicController()->home();
+        });
+        $router->get('/hero-media', static function () use ($getPublicController): void {
+            $getPublicController()->heroMedia();
+        });
+        $router->get('/team', static function () use ($getPublicController): void {
+            $getPublicController()->team();
+        });
         $shopController = null;
         $getShopController = static function () use (&$shopController, $config, $getPdo): ShopController {
             if (!$shopController instanceof ShopController) {
@@ -106,7 +95,7 @@ try {
             return $shopController;
         };
 
-        foreach (['teams', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'settings', 'security', 'activity'] as $resource) {
+        foreach (['teams', 'players', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'settings', 'homepage-hero', 'security', 'activity'] as $resource) {
             $router->get('/admin/' . $resource, static function () use ($getOperationsController, $resource): void {
                 $getOperationsController()->manage($resource);
             });
@@ -114,12 +103,12 @@ try {
         $router->post('/admin/orders/create', static function () use ($getOperationsController): void {
             $getOperationsController()->createOrder();
         });
-        foreach (['teams', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'security'] as $resource) {
+        foreach (['teams', 'players', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'security'] as $resource) {
             $router->post('/admin/' . $resource . '/save', static function () use ($getOperationsController, $resource): void {
                 $getOperationsController()->save($resource);
             });
         }
-        foreach (['teams', 'venues', 'fixtures', 'registrations', 'products'] as $resource) {
+        foreach (['teams', 'players', 'venues', 'fixtures', 'registrations', 'products'] as $resource) {
             $router->post('/admin/' . $resource . '/delete', static function () use ($getOperationsController, $resource): void {
                 $getOperationsController()->delete($resource);
             });
@@ -139,6 +128,9 @@ try {
         }
         $router->post('/admin/settings/save', static function () use ($getOperationsController): void {
             $getOperationsController()->saveSettings();
+        });
+        $router->post('/admin/homepage-hero/save', static function () use ($getOperationsController): void {
+            $getOperationsController()->saveHomepageHero();
         });
         $router->post('/admin/security/unblock', static function () use ($getOperationsController): void {
             $getOperationsController()->unblockIp();
@@ -168,6 +160,9 @@ try {
         $router->post('/shop/checkout', static function () use ($getShopController): void {
             $getShopController()->checkout();
         });
+        $router->get('/shop/pay', static function () use ($getShopController): void {
+            $getShopController()->inlineCheckout();
+        });
         $router->get('/shop/return', static function () use ($getShopController): void {
             $getShopController()->paymentReturn();
         });
@@ -195,6 +190,9 @@ try {
         });
         $router->get('/admin', static function () use ($getAdminController): void {
             $getAdminController()->dashboard();
+        });
+        $router->post('/admin/site-mode', static function () use ($getAdminController): void {
+            $getAdminController()->switchSiteMode();
         });
         $router->post('/admin/email-test', static function () use ($getAdminController): void {
             $getAdminController()->sendTestEmail();

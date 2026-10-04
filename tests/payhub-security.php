@@ -20,6 +20,13 @@ expect(ShopService::formatKobo(125040) === '1250.40', 'Kobo formatting failed.')
 
 $secret = 'sk_live_test_secret_123456';
 $client = new PayHubClient(['payments' => ['secret_key' => $secret]]);
+$inlineClient = new PayHubClient(['payments' => ['secret_key' => $secret, 'public_key' => 'pk_test_public_key_123456']]);
+expect($client->isConfigured() && !$client->isInlineConfigured(), 'Server verification should work without enabling inline checkout.');
+expect($inlineClient->isInlineConfigured(), 'A valid PayHub public and secret key should enable inline checkout.');
+expect($inlineClient->publicKey() === 'pk_test_public_key_123456', 'The configured public key was not returned.');
+expect(!PayHubClient::isValidKey("key with spaces"), 'A key containing whitespace was accepted.');
+$inlineReference = PayHubClient::createInlineReference();
+expect(preg_match('/^YUC-[A-F0-9]{32}$/D', $inlineReference) === 1, 'Inline references must be unpredictable, provider-safe values.');
 $body = '{"event":"charge.success","data":{"reference":"PH_test_123"}}';
 $signature = hash_hmac('sha256', $body, $secret);
 expect($client->hasValidWebhookSignature($body, $signature), 'Valid webhook signature was rejected.');
@@ -29,6 +36,7 @@ expect(!$client->hasValidWebhookSignature($body, str_repeat('0', 64)), 'Invalid 
 expect(PayHubClient::isTrustedCheckoutUrl('https://merchant.payhub.com.ng/checkout.php?ref=PH_test'), 'PayHub checkout URL was rejected.');
 expect(!PayHubClient::isTrustedCheckoutUrl('http://merchant.payhub.com.ng/checkout.php?ref=PH_test'), 'Insecure checkout URL was accepted.');
 expect(!PayHubClient::isTrustedCheckoutUrl('https://attacker.example/checkout.php?ref=PH_test'), 'Untrusted checkout host was accepted.');
+expect(!PayHubClient::isTrustedCheckoutUrl('https://merchant.payhub.com.ng/checkout-attacker?ref=PH_test'), 'An unrecognized checkout path was accepted.');
 
 $invalidAmountRejected = false;
 try {

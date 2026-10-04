@@ -16,7 +16,7 @@ final class RequirementsService
 
         $add('PHP version', '8.1 or newer', PHP_VERSION, version_compare(PHP_VERSION, '8.1.0', '>='));
 
-        foreach (['pdo', 'pdo_mysql', 'curl', 'openssl', 'mbstring', 'json', 'session'] as $extension) {
+        foreach (['pdo', 'pdo_mysql', 'curl', 'openssl', 'mbstring', 'json', 'session', 'fileinfo', 'gd'] as $extension) {
             $add(
                 'PHP extension: ' . $extension,
                 'Enabled',
@@ -24,6 +24,9 @@ final class RequirementsService
                 extension_loaded($extension)
             );
         }
+
+        $webpSupport = function_exists('imagewebp') && function_exists('imagecreatefromstring') && function_exists('getimagesize');
+        $add('GD WebP image optimization', 'Enabled', $webpSupport ? 'Enabled' : 'Missing', $webpSupport);
 
         $configDirectory = YUC_ROOT . '/config';
         $storageDirectory = YUC_ROOT . '/storage';

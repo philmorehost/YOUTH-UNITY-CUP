@@ -7,6 +7,7 @@ namespace Yuc\Controllers;
 use PDO;
 use Throwable;
 use Yuc\Core\View;
+use Yuc\Services\EnvironmentModeService;
 use Yuc\Services\PayHubClient;
 use Yuc\Services\ShopService;
 
@@ -14,26 +15,30 @@ final class ShopController
 {
     private ShopService $shop;
     private PayHubClient $payHub;
+    private EnvironmentModeService $environmentMode;
 
     /** @param array<string,mixed> $config */
     public function __construct(PDO $pdo, private array $config)
     {
         $this->shop = new ShopService($pdo, $config);
         $this->payHub = new PayHubClient($config);
+        $this->environmentMode = new EnvironmentModeService($pdo);
     }
 
     public function index(): void
     {
         $settings = $this->shopSettings();
+        $siteMode = $this->environmentMode->currentMode();
         $oldForm = is_array($_SESSION['_shop_old_form'] ?? null) ? $_SESSION['_shop_old_form'] : [];
         unset($_SESSION['_shop_old_form']);
         View::render('shop', [
             'title' => 'Official shop · ' . $settings['site_title'],
             'topNote' => 'YOUTH UNITY CUP OFFICIAL SHOP',
             'bodyClass' => 'public-data-page shop-page',
-            'products' => $this->shop->publicProducts(),
-            'payHubConfigured' => $this->payHub->isConfigured(),
+            'products' => $this->shop->publicProducts($siteMode !== 'demo'),
+            'payHubConfigured' => $this->payHub->isInlineConfigured(),
             'contactEmail' => $settings['contact_email'],
+            'siteMode' => $siteMode,
             'flash' => yuc_take_flash(),
             'lastOrderAvailable' => isset($_SESSION['last_shop_order']),
             'oldForm' => $oldForm,
@@ -50,8 +55,12 @@ final class ShopController
         if (!is_scalar($honeypot) || trim((string) $honeypot) !== '') {
             yuc_redirect('/shop');
         }
-        if (!$this->payHub->isConfigured()) {
-            yuc_flash('error', 'Online payments are not configured yet. Please contact the tournament team.');
+        if ($this->environmentMode->isDemo()) {
+            yuc_flash('error', 'Checkout is paused while the site is in Demo mode. No shop orders or payments are accepted during preview.');
+            yuc_redirect('/shop');
+        }
+        if (!$this->payHub->isInlineConfigured()) {
+            yuc_flash('error', 'PayHub inline checkout is not fully configured yet. Please contact the tournament team.');
             yuc_redirect('/shop');
         }
 
@@ -59,15 +68,10 @@ final class ShopController
         try {
             $order = $this->shop->createOrder($_POST, yuc_client_ip());
             $orderReference = $order['reference'];
-            $checkout = $this->payHub->initialize([
-                'email' => $order['email'],
-                'amount_kobo' => $order['total_kobo'],
-                'name' => $order['name'],
-                'phone' => $order['phone'],
-            ]);
-            $this->shop->attachPayment($orderReference, $checkout['reference'], $checkout['authorization_url']);
+            $providerReference = PayHubClient::createInlineReference();
+            $this->shop->attachInlinePayment($orderReference, $providerReference);
             $_SESSION['last_shop_order'] = $orderReference;
-            yuc_redirect($checkout['authorization_url']);
+            yuc_redirect('/shop/pay?order=' . rawurlencode($orderReference));
         } catch (\InvalidArgumentException $exception) {
             $_SESSION['_shop_old_form'] = $this->safeCheckoutValues($_POST);
             yuc_flash('error', $exception->getMessage());
@@ -79,10 +83,47 @@ final class ShopController
                     error_log('Youth Unity Cup failed shop reservation cleanup (' . get_class($cleanupException) . ').');
                 }
             }
-            error_log('Youth Unity Cup PayHub checkout initialization failed (' . get_class($exception) . ').');
-            yuc_flash('error', 'We could not start your PayHub checkout. No payment has been confirmed. Please try again or contact the tournament team.');
+            error_log('Youth Unity Cup PayHub inline checkout preparation failed (' . get_class($exception) . ').');
+            yuc_flash('error', 'We could not prepare your PayHub inline checkout. No payment has been confirmed. Please try again or contact the tournament team.');
         }
         yuc_redirect('/shop');
+    }
+
+    public function inlineCheckout(): void
+    {
+        header('Cache-Control: no-store');
+        if ($this->environmentMode->isDemo()) {
+            yuc_flash('error', 'PayHub checkout is paused while the site is in Demo mode.');
+            yuc_redirect('/shop');
+        }
+        if (!$this->payHub->isInlineConfigured()) {
+            yuc_flash('error', 'PayHub inline checkout is not fully configured yet. Please contact the tournament team.');
+            yuc_redirect('/shop');
+        }
+
+        $orderInput = $_GET['order'] ?? '';
+        $orderReference = is_string($orderInput) ? $orderInput : '';
+        $sessionReference = is_string($_SESSION['last_shop_order'] ?? null) ? $_SESSION['last_shop_order'] : '';
+        if ($orderReference === '' || !hash_equals($sessionReference, $orderReference)) {
+            yuc_flash('error', 'Open the inline payment page from your current shop checkout session.');
+            yuc_redirect('/shop');
+        }
+        $order = $this->shop->inlineOrderForCustomer($orderReference);
+        if ($order === null) {
+            yuc_redirect('/shop/return?order=' . rawurlencode($orderReference));
+        }
+
+        View::render('shop-inline-checkout', [
+            'title' => 'Secure checkout · Youth Unity Cup',
+            'topNote' => 'PAYHUB SECURE INLINE CHECKOUT',
+            'bodyClass' => 'public-data-page shop-page',
+            'siteMode' => 'production',
+            'order' => $order,
+            'payHubPublicKey' => $this->payHub->publicKey(),
+            'returnUrl' => '/shop/return?order=' . rawurlencode($orderReference),
+            'contactEmail' => $this->shopSettings()['contact_email'],
+            'inlinePayHubScript' => true,
+        ]);
     }
 
     public function paymentReturn(): void
@@ -103,7 +144,10 @@ final class ShopController
         }
 
         $verificationNotice = '';
-        if ($orderReference !== '' && $this->payHub->isConfigured()) {
+        $siteMode = $this->environmentMode->currentMode();
+        if ($siteMode === 'demo') {
+            $verificationNotice = 'This site is in Demo mode. Payment verification is paused; switch back to Production to continue live order checks.';
+        } elseif ($orderReference !== '' && $this->payHub->isConfigured()) {
             try {
                 $this->shop->refreshPayment($orderReference, $this->payHub);
             } catch (Throwable $exception) {
@@ -112,6 +156,13 @@ final class ShopController
             }
         }
         $order = $orderReference !== '' ? $this->shop->orderForCustomer($orderReference) : null;
+        $inlineCheckoutUrl = '';
+        $sessionOrderReference = is_string($_SESSION['last_shop_order'] ?? null) ? $_SESSION['last_shop_order'] : '';
+        if ($order !== null && $siteMode !== 'demo' && $this->payHub->isInlineConfigured()
+            && ($order['status'] ?? '') === 'pending_payment'
+            && hash_equals($sessionOrderReference, $orderReference)) {
+            $inlineCheckoutUrl = '/shop/pay?order=' . rawurlencode($orderReference);
+        }
         if ($order === null) {
             $verificationNotice = 'No recent shop order is available in this browser. If you completed a payment, use the order reference from your receipt or contact the tournament team.';
         }
@@ -122,7 +173,9 @@ final class ShopController
             'bodyClass' => 'public-data-page shop-page',
             'order' => $order,
             'verificationNotice' => $verificationNotice,
+            'inlineCheckoutUrl' => $inlineCheckoutUrl,
             'contactEmail' => $this->shopSettings()['contact_email'],
+            'siteMode' => $siteMode,
         ]);
     }
 

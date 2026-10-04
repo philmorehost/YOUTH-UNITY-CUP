@@ -9,12 +9,13 @@
 /** @var array<string,mixed> $mail */
 /** @var array{type:string,message:string}|null $flash */
 $resourceTitles = [
-    'teams' => 'Teams', 'venues' => 'Venues', 'fixtures' => 'Fixtures & scores',
-    'registrations' => 'Registrations', 'transactions' => 'Transactions', 'products' => 'Shop products', 'orders' => 'Shop orders', 'settings' => 'Site & security settings', 'security' => 'Blocked IP access', 'activity' => 'Audit activity',
+    'teams' => 'Teams', 'players' => 'Player profiles', 'venues' => 'Venues', 'fixtures' => 'Fixtures & scores',
+    'registrations' => 'Registrations', 'transactions' => 'Transactions', 'products' => 'Shop products', 'orders' => 'Shop orders', 'settings' => 'Site & security settings', 'homepage-hero' => 'Homepage hero', 'security' => 'Blocked IP access', 'activity' => 'Audit activity',
 ];
 $title = $resourceTitles[$resource] ?? 'Admin';
 $formValues = is_array($formValues ?? null) ? $formValues : [];
 $settings = is_array($settings ?? null) ? $settings : [];
+$heroSettings = is_array($heroSettings ?? null) ? $heroSettings : [];
 $mail = is_array($mail ?? null) ? $mail : [];
 $auditTotal = (int) ($auditTotal ?? 0);
 $auditPage = max(1, (int) ($auditPage ?? 1));
@@ -23,9 +24,12 @@ $auditSearch = (string) ($auditSearch ?? '');
 $auditCategory = (string) ($auditCategory ?? '');
 $showArchived = !empty($showArchived);
 $payHubConfigured = !empty($payHubConfigured);
+$payHubSecretConfigured = !empty($payHubSecretConfigured ?? $payHubConfigured);
+$payHubPublicConfigured = !empty($payHubPublicConfigured ?? $payHubConfigured);
+$siteMode = ($siteMode ?? 'production') === 'demo' ? 'demo' : 'production';
 $orderProducts = is_array($orderProducts ?? null) ? $orderProducts : [];
 $liveSearchLabels = [
-    'teams' => 'teams', 'venues' => 'venues', 'fixtures' => 'fixtures and scores',
+    'teams' => 'teams', 'players' => 'player profiles', 'venues' => 'venues', 'fixtures' => 'fixtures and scores',
     'registrations' => 'registrations', 'transactions' => 'transactions', 'products' => 'shop products',
     'orders' => 'shop orders', 'security' => 'blocked IPs',
 ];
@@ -50,12 +54,14 @@ $venues = is_array($venues ?? null) ? $venues : [];
 
     <nav class="ops-nav" aria-label="Admin sections">
         <a href="/admin/teams" class="<?= $resource === 'teams' ? 'active' : '' ?>">Teams</a>
+        <a href="/admin/players" class="<?= $resource === 'players' ? 'active' : '' ?>">Players</a>
         <a href="/admin/venues" class="<?= $resource === 'venues' ? 'active' : '' ?>">Venues</a>
         <a href="/admin/fixtures" class="<?= $resource === 'fixtures' ? 'active' : '' ?>">Fixtures &amp; scores</a>
         <a href="/admin/registrations" class="<?= $resource === 'registrations' ? 'active' : '' ?>">Registrations</a>
         <a href="/admin/transactions" class="<?= $resource === 'transactions' ? 'active' : '' ?>">Transactions</a>
         <a href="/admin/products" class="<?= $resource === 'products' ? 'active' : '' ?>">Shop products</a>
         <a href="/admin/orders" class="<?= $resource === 'orders' ? 'active' : '' ?>">Shop orders</a>
+        <a href="/admin/homepage-hero" class="<?= $resource === 'homepage-hero' ? 'active' : '' ?>">Homepage hero</a>
         <a href="/admin/settings" class="<?= $resource === 'settings' ? 'active' : '' ?>">Settings</a>
         <a href="/admin/security" class="<?= $resource === 'security' ? 'active' : '' ?>">Blocked IPs</a>
         <a href="/admin/activity" class="<?= $resource === 'activity' ? 'active' : '' ?>">Audit activity</a>
@@ -63,6 +69,10 @@ $venues = is_array($venues ?? null) ? $venues : [];
 
     <?php if (is_array($flash)): ?>
         <div class="alert alert-<?= yuc_e($flash['type']) ?>" role="status" aria-live="polite"><span class="alert-icon" aria-hidden="true"><?= $flash['type'] === 'error' ? '!' : '✓' ?></span><p><?= yuc_e($flash['message']) ?></p></div>
+    <?php endif; ?>
+
+    <?php if ($siteMode === 'demo'): ?>
+        <aside class="demo-admin-note" role="status"><strong>DEMO MODE — SAMPLE DATA ONLY</strong><span>Tournament edits affect demo data only. Registrations, payment records, shop, settings, and security operations are read-only. <a href="/admin">Use the dashboard to switch back to Production.</a></span></aside>
     <?php endif; ?>
 
     <?php if ($liveSearchEnabled): ?>
@@ -92,6 +102,27 @@ $venues = is_array($venues ?? null) ? $venues : [];
                 <?php if ($rows === []): ?><tr><td colspan="4" class="empty-state">No teams yet. Add the first team using the form.</td></tr><?php else: foreach ($rows as $row): ?>
                     <tr data-search-text="<?= yuc_e($row['notes'] ?? '') ?>"><td><strong><?= yuc_e($row['name']) ?></strong><small><?= yuc_e($row['contact_email']) ?></small></td><td><?= yuc_e($row['zone']) ?><?= !empty($row['group_name']) ? ' · ' . yuc_e($row['group_name']) : '' ?></td><td><span class="outcome-badge outcome-<?= yuc_e($row['status']) ?>"><?= yuc_e(strtoupper((string) $row['status'])) ?></span></td><td class="table-actions"><a class="table-action" href="/admin/teams?edit=<?= (int) $row['id'] ?>">Edit</a><form method="post" action="/admin/teams/delete" data-confirm="Delete this team? Teams used in fixtures cannot be deleted; set them inactive instead."><?= yuc_csrf_field() ?><input type="hidden" name="id" value="<?= (int) $row['id'] ?>"><button class="table-action table-action-danger" type="submit">Delete</button></form></td></tr>
                 <?php endforeach; endif; ?></tbody></table></div>
+            </section>
+        </div>
+
+    <?php elseif ($resource === 'players'): ?>
+        <div class="ops-grid player-admin-grid">
+            <section class="panel ops-form-panel"><div class="panel-kicker">TEAM SQUADS</div><h2><?= isset($formValues['id']) ? 'Edit player profile' : 'Add a player profile' ?></h2><p class="panel-intro">Manage public squad cards. Use an HTTPS image URL for a real headshot, or choose a local illustrated portrait.</p>
+                <form method="post" action="/admin/players/save" class="form-stack">
+                    <?= yuc_csrf_field() ?><input type="hidden" name="id" value="<?= yuc_e($formValues['id'] ?? '0') ?>">
+                    <div class="field-group"><label for="player-team">Team</label><select id="player-team" name="team_id" required><option value="">Choose team</option><?php foreach ($teams as $team): ?><option value="<?= (int) $team['id'] ?>" <?= (string) ($formValues['team_id'] ?? '') === (string) $team['id'] ? 'selected' : '' ?>><?= yuc_e($team['name']) ?> · <?= yuc_e($team['zone']) ?></option><?php endforeach; ?></select></div>
+                    <div class="field-group"><label for="player-name">Full name</label><input id="player-name" name="full_name" required maxlength="120" value="<?= yuc_e($formValues['full_name'] ?? '') ?>"></div>
+                    <div class="form-grid"><div class="field-group"><label for="player-position">Playing position</label><input id="player-position" name="position" required maxlength="40" placeholder="Midfielder" value="<?= yuc_e($formValues['position'] ?? '') ?>"></div><div class="field-group"><label for="player-number">Squad number</label><input id="player-number" name="jersey_number" type="number" min="1" max="99" value="<?= yuc_e($formValues['jersey_number'] ?? '') ?>"></div></div>
+                    <div class="form-grid"><div class="field-group"><label for="player-age">Age</label><input id="player-age" name="age" type="number" min="10" max="19" value="<?= yuc_e($formValues['age'] ?? '') ?>"></div><div class="field-group"><label for="player-hometown">Hometown / zone</label><input id="player-hometown" name="hometown" maxlength="80" value="<?= yuc_e($formValues['hometown'] ?? '') ?>"></div></div>
+                    <div class="field-group"><label for="player-photo-url">Headshot URL <span>(optional, HTTPS only)</span></label><input id="player-photo-url" name="photo_url" type="url" maxlength="500" placeholder="https://example.com/player.jpg" value="<?= yuc_e($formValues['photo_url'] ?? '') ?>"><small>Leave blank to use a self-hosted illustrated portrait.</small></div>
+                    <div class="form-grid"><div class="field-group"><label for="player-avatar">Illustrated portrait</label><select id="player-avatar" name="avatar_variant"><?php for ($avatar = 1; $avatar <= 8; $avatar++): ?><option value="<?= $avatar ?>" <?= (int) ($formValues['avatar_variant'] ?? 1) === $avatar ? 'selected' : '' ?>>Portrait palette <?= $avatar ?></option><?php endfor; ?></select></div><div class="field-group"><label for="player-status">Roster status</label><select id="player-status" name="status"><option value="active" <?= ($formValues['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>Active</option><option value="inactive" <?= ($formValues['status'] ?? '') === 'inactive' ? 'selected' : '' ?>>Inactive</option></select></div></div>
+                    <div class="field-group"><label for="player-bio">Player details</label><textarea id="player-bio" name="bio" rows="3" maxlength="350" placeholder="A brief playing style or profile note."><?= yuc_e($formValues['bio'] ?? '') ?></textarea></div>
+                    <div class="form-actions"><a class="button button-quiet" href="/admin/players">Clear</a><button class="button button-primary" type="submit" <?= $teams === [] ? 'disabled' : '' ?>>Save player</button></div>
+                </form>
+            </section>
+            <section class="panel ops-table-panel"><div class="panel-topline"><div><div class="panel-kicker">SQUAD DIRECTORY</div><h2>Player profiles</h2></div><span class="readiness-pill is-ready"><span></span><?= count($rows) ?> PLAYERS</span></div>
+                <div class="responsive-table"><table class="data-table ops-table"><thead><tr><th>Player</th><th>Team</th><th>Role / age</th><th>Status</th><th>Manage</th></tr></thead><tbody>
+                <?php if ($rows === []): ?><tr><td colspan="5" class="empty-state">No player profiles yet. Choose a team and add its first squad member.</td></tr><?php else: foreach ($rows as $row): ?><tr data-search-text="<?= yuc_e($row['bio'] . ' ' . $row['hometown']) ?>"><td><span class="admin-player-cell"><span class="admin-player-avatar"><?= yuc_player_avatar((int) $row['avatar_variant']) ?></span><span><strong><?= yuc_e($row['full_name']) ?></strong><small><?= $row['jersey_number'] !== null ? '#' . (int) $row['jersey_number'] : 'No squad number' ?><?= !empty($row['photo_url']) ? ' · headshot URL' : '' ?></small></span></span></td><td><strong><?= yuc_e($row['team_name']) ?></strong><small><?= yuc_e($row['team_zone']) ?></small></td><td><?= yuc_e($row['position']) ?><?= $row['age'] !== null ? ' · ' . (int) $row['age'] . ' yrs' : '' ?></td><td><span class="outcome-badge outcome-<?= yuc_e($row['status']) ?>"><?= yuc_e(strtoupper((string) $row['status'])) ?></span></td><td class="table-actions"><a class="table-action" href="/admin/players?edit=<?= (int) $row['id'] ?>">Edit</a><form method="post" action="/admin/players/delete" data-confirm="Delete this player profile from the public team roster?"><?= yuc_csrf_field() ?><input type="hidden" name="id" value="<?= (int) $row['id'] ?>"><button class="table-action table-action-danger" type="submit">Delete</button></form></td></tr><?php endforeach; endif; ?></tbody></table></div>
             </section>
         </div>
 
@@ -214,9 +245,9 @@ $venues = is_array($venues ?? null) ? $venues : [];
             </section>
         <?php endif; ?>
         <details class="panel order-create-panel" <?= !empty($formValues['create_order']) ? 'open' : '' ?>>
-            <summary><div><span class="panel-kicker">SAFE ORDER CREATION</span><strong>Create a shop order</strong><small>Reserve stock and initialize a verified PayHub checkout</small></div><span class="readiness-pill <?= $payHubConfigured && $orderProducts !== [] ? 'is-ready' : 'is-warning' ?>"><span></span>NEW ORDER</span></summary>
-            <p class="panel-intro">The order starts as pending payment. Inventory is reserved atomically, payment is initialized with PayHub, and no order is marked paid until server-side verification succeeds. Open the saved checkout link from the order list to share it with the customer.</p>
-            <?php if (!$payHubConfigured): ?><div class="alert alert-error" role="status"><span class="alert-icon" aria-hidden="true">!</span><p>PayHub is not configured. Add the secret under Settings before creating shop orders.</p></div><?php elseif ($orderProducts === []): ?><div class="alert alert-error" role="status"><span class="alert-icon" aria-hidden="true">!</span><p>No active products with available stock can be ordered right now.</p></div><?php endif; ?>
+            <summary><div><span class="panel-kicker">SAFE ORDER CREATION</span><strong>Create a shop order</strong><small>Reserve stock and open a verified PayHub inline checkout</small></div><span class="readiness-pill <?= $payHubConfigured && $orderProducts !== [] ? 'is-ready' : 'is-warning' ?>"><span></span>NEW ORDER</span></summary>
+            <p class="panel-intro">The order starts as pending payment and inventory is reserved atomically. The inline checkout opens with a user click; payment remains unconfirmed until the webhook or return page is reconciled against PayHub's verification API.</p>
+            <?php if ($siteMode === 'demo'): ?><div class="demo-checkout-note"><strong>Shop operations are read-only in Demo mode.</strong><span>No stock reservation, shop order, or payment record will be created. Existing production orders remain unchanged.</span></div><?php elseif (!$payHubConfigured): ?><div class="alert alert-error" role="status"><span class="alert-icon" aria-hidden="true">!</span><p>PayHub inline checkout is not configured. Add both the secret and public keys under Settings before creating shop orders.</p></div><?php elseif ($orderProducts === []): ?><div class="alert alert-error" role="status"><span class="alert-icon" aria-hidden="true">!</span><p>No active products with available stock can be ordered right now.</p></div><?php endif; ?>
             <form method="post" action="/admin/orders/create" class="form-stack">
                 <?= yuc_csrf_field() ?><input type="hidden" name="create_order" value="1">
                 <div class="form-grid"><div class="field-group"><label for="new-order-customer-name">Customer name</label><input id="new-order-customer-name" name="customer_name" required maxlength="140" value="<?= yuc_e($formValues['customer_name'] ?? '') ?>"></div><div class="field-group"><label for="new-order-customer-email">Customer email</label><input id="new-order-customer-email" name="customer_email" type="email" required maxlength="190" value="<?= yuc_e($formValues['customer_email'] ?? '') ?>"></div></div>
@@ -227,14 +258,14 @@ $venues = is_array($venues ?? null) ? $venues : [];
                     <?php endforeach; ?>
                     <?php if ($orderProducts === []): ?><p class="admin-order-products-empty">Product choices appear here when an active item has stock.</p><?php endif; ?>
                 </div></fieldset>
-                <div class="form-actions"><button class="button button-primary" type="submit" <?= !$payHubConfigured || $orderProducts === [] ? 'disabled' : '' ?>>Create order &amp; initialize PayHub</button></div>
+                <div class="form-actions"><button class="button button-primary" type="submit" <?= $siteMode === 'demo' || !$payHubConfigured || $orderProducts === [] ? 'disabled' : '' ?>>Create order &amp; open inline checkout</button></div>
             </form>
         </details>
         <section class="panel ops-table-panel full-ops-panel"><div class="panel-topline"><div><div class="panel-kicker">PAYMENT &amp; FULFILLMENT</div><h2><?= $showArchived ? 'Archived shop orders' : 'Shop orders' ?></h2></div><div class="panel-topline-actions"><span class="readiness-pill is-ready"><span></span><?= count($rows) ?> ORDERS</span><a class="table-action" href="/admin/orders?show_archived=<?= $showArchived ? '0' : '1' ?>"><?= $showArchived ? 'Show active' : 'Show archived' ?></a></div></div>
-            <p class="panel-intro">Admin-created orders use the same checkout, atomic stock reservation, and PayHub verification path as public orders. Edit only customer/fulfillment details; archive only fulfilled, failed, or cancelled orders. Payment history is never deleted.</p>
+            <p class="panel-intro">Admin-created orders use PayHub inline checkout with the same atomic stock reservation and server-side payment verification as public orders. Pending orders open in a secure modal from this list; edit only customer/fulfillment details. Payment history is never deleted.</p>
             <div class="responsive-table"><table class="data-table ops-table shop-orders-table"><thead><tr><th>Order / items</th><th>Customer &amp; fulfillment</th><th>Total</th><th>PayHub reference</th><th>Order status</th><th>Next action</th><th>Manage</th></tr></thead><tbody>
             <?php if ($rows === []): ?><tr><td colspan="7" class="empty-state">No shop orders have been placed.</td></tr><?php else: foreach ($rows as $row):
-                $statusOptions = !empty($row['archived_at']) ? [] : match ((string) $row['status']) {
+                $statusOptions = $siteMode === 'demo' || !empty($row['archived_at']) ? [] : match ((string) $row['status']) {
                     'pending_payment' => ['cancelled' => 'Close &amp; release stock'],
                     'paid_needs_review' => ['paid' => 'Confirm review'],
                     'paid' => ['processing' => 'Start processing'],
@@ -247,7 +278,7 @@ $venues = is_array($venues ?? null) ? $venues : [];
                     <td>₦<?= number_format((int) $row['total_kobo'] / 100, 2) ?></td><td class="mono-cell"><?= yuc_e($row['provider_reference'] ?? 'Not initialized') ?><?php if ($row['provider_amount_kobo'] !== null): ?><small>Paid: <?= yuc_e($row['provider_amount_kobo']) ?> kobo (<?= yuc_e($row['provider_currency'] ?? '') ?>)</small><?php endif; ?><?php if (!empty($row['payment_review_reason'])): ?><small class="shop-review-reason">Review: <?= yuc_e(str_replace('_', ' ', $row['payment_review_reason'])) ?></small><?php endif; ?></td>
                     <td><?php if (!empty($row['archived_at'])): ?><span class="outcome-badge outcome-cancelled">ARCHIVED</span><?php endif; ?><span class="outcome-badge outcome-<?= yuc_e($row['status']) ?>"><?= yuc_e(strtoupper(str_replace('_', ' ', (string) $row['status']))) ?></span><?php if ($row['status'] === 'pending_payment'): ?><small>Reservation expires <?= yuc_e($row['reservation_expires_at']) ?> UTC</small><?php endif; ?></td>
                     <td><?php if ($statusOptions !== []): ?><form method="post" action="/admin/orders/status" class="inline-status-form" data-confirm="Update this shop order? Cancellation releases the unpaid stock reservation."><?= yuc_csrf_field() ?><input type="hidden" name="id" value="<?= (int) $row['id'] ?>"><select name="status" aria-label="Next order status"><?php foreach ($statusOptions as $nextStatus => $label): ?><option value="<?= yuc_e($nextStatus) ?>"><?= $label ?></option><?php endforeach; ?></select><button class="button button-quiet" type="submit">Update</button></form><?php else: ?><span class="audit-no-context">No action</span><?php endif; ?></td>
-                    <td class="table-actions"><?php if ($row['status'] === 'pending_payment' && !empty($row['checkout_url']) && \Yuc\Services\PayHubClient::isTrustedCheckoutUrl((string) $row['checkout_url'])): ?><a class="table-action" href="<?= yuc_e($row['checkout_url']) ?>" target="_blank" rel="noopener noreferrer">Open PayHub checkout</a><?php endif; ?><?php if (empty($row['archived_at'])): ?><a class="table-action" href="/admin/orders?edit=<?= (int) $row['id'] ?>">Edit details</a><?php endif; ?><?php if (!empty($row['archived_at']) || in_array((string) $row['status'], ['fulfilled','payment_failed','cancelled'], true)): ?><form method="post" action="/admin/orders/archive" data-confirm="<?= !empty($row['archived_at']) ? 'Restore this order to the active list?' : 'Archive this closed order from operations? The order, payment record, and audit history will be preserved.' ?>"><?= yuc_csrf_field() ?><input type="hidden" name="id" value="<?= (int) $row['id'] ?>"><input type="hidden" name="archived" value="<?= empty($row['archived_at']) ? '1' : '0' ?>"><button class="table-action <?= empty($row['archived_at']) ? 'table-action-danger' : '' ?>" type="submit"><?= empty($row['archived_at']) ? 'Archive' : 'Restore' ?></button></form><?php else: ?><span class="table-action-locked">Close/fulfill first</span><?php endif; ?></td></tr>
+                    <td class="table-actions"><?php if ($siteMode !== 'demo' && $row['status'] === 'pending_payment' && !empty($row['checkout_url']) && \Yuc\Services\PayHubClient::isTrustedCheckoutUrl((string) $row['checkout_url'])): ?><a class="table-action" href="<?= yuc_e($row['checkout_url']) ?>" target="_blank" rel="noopener noreferrer">Open PayHub checkout</a><?php elseif ($siteMode !== 'demo' && $row['status'] === 'pending_payment' && !empty($row['provider_reference']) && empty($row['checkout_url'])): ?><a class="table-action" href="/admin/orders?pay=<?= (int) $row['id'] ?>">Open inline checkout</a><?php endif; ?><?php if ($siteMode !== 'demo' && empty($row['archived_at'])): ?><a class="table-action" href="/admin/orders?edit=<?= (int) $row['id'] ?>">Edit details</a><?php endif; ?><?php if ($siteMode !== 'demo' && (!empty($row['archived_at']) || in_array((string) $row['status'], ['fulfilled','payment_failed','cancelled'], true))): ?><form method="post" action="/admin/orders/archive" data-confirm="<?= !empty($row['archived_at']) ? 'Restore this order to the active list?' : 'Archive this closed order from operations? The order, payment record, and audit history will be preserved.' ?>"><?= yuc_csrf_field() ?><input type="hidden" name="id" value="<?= (int) $row['id'] ?>"><input type="hidden" name="archived" value="<?= empty($row['archived_at']) ? '1' : '0' ?>"><button class="table-action <?= empty($row['archived_at']) ? 'table-action-danger' : '' ?>" type="submit"><?= empty($row['archived_at']) ? 'Archive' : 'Restore' ?></button></form><?php else: ?><span class="table-action-locked"><?= $siteMode === 'demo' ? 'Read-only in Demo mode' : 'Close/fulfill first' ?></span><?php endif; ?></td></tr>
             <?php endforeach; endif; ?></tbody></table></div>
         </section>
 
@@ -288,6 +319,30 @@ $venues = is_array($venues ?? null) ? $venues : [];
             </section>
         </div>
 
+    <?php elseif ($resource === 'homepage-hero'): ?>
+        <section class="panel settings-panel homepage-hero-settings-panel"><div class="panel-kicker">HOMEPAGE PRESENTATION</div><h2>Manage the hero media</h2>
+            <p class="panel-intro">Choose the default tournament art, a protected image upload, a looping YouTube video, or a short web-optimized video file. Text, match links, and season information remain editable in the site source; uploaded media stays outside the public document root.</p>
+            <?php if ($siteMode === 'demo'): ?><div class="alert alert-error" role="status"><span class="alert-icon" aria-hidden="true">!</span><p>Homepage changes are read-only in Demo mode. Switch to Production to update the live hero.</p></div><?php endif; ?>
+            <div class="hero-admin-current">
+                <div><span class="panel-kicker">CURRENT HERO · <?= yuc_e(strtoupper((string) ($heroSettings['type'] ?? 'default'))) ?></span>
+                    <?php if (($heroSettings['type'] ?? 'default') === 'image' && !empty($heroSettings['media_url'])): ?><img src="<?= yuc_e($heroSettings['media_url']) ?>" alt="<?= yuc_e($heroSettings['image_alt'] ?? 'Current homepage hero') ?>" loading="lazy" decoding="async">
+                    <?php elseif (($heroSettings['type'] ?? 'default') === 'video' && !empty($heroSettings['media_url'])): ?><video controls playsinline preload="metadata" poster="/assets/yuc-hero.jpg"><source src="<?= yuc_e($heroSettings['media_url']) ?>" type="<?= str_ends_with((string) $heroSettings['media_file'], '.webm') ? 'video/webm' : 'video/mp4' ?>">Your browser cannot preview this video.</video>
+                    <?php elseif (($heroSettings['type'] ?? 'default') === 'youtube' && !empty($heroSettings['youtube_url'])): ?><p>Looping clip: <a href="<?= yuc_e($heroSettings['youtube_url']) ?>" target="_blank" rel="noopener noreferrer"><?= yuc_e($heroSettings['youtube_id']) ?> ↗</a></p>
+                    <?php else: ?><img src="/assets/yuc-hero.jpg" alt="Current default Youth Unity Cup hero art" loading="lazy" decoding="async"><?php endif; ?>
+                </div>
+                <a class="button button-quiet" href="/" target="_blank" rel="noopener noreferrer">Preview homepage ↗</a>
+            </div>
+            <form method="post" action="/admin/homepage-hero/save" enctype="multipart/form-data" class="form-stack homepage-hero-form">
+                <?= yuc_csrf_field() ?>
+                <div class="field-group"><label for="homepage-hero-type">Hero media source</label><select id="homepage-hero-type" name="hero_type" required <?= $siteMode === 'demo' ? 'disabled' : '' ?>><option value="default" <?= ($heroSettings['type'] ?? 'default') === 'default' ? 'selected' : '' ?>>Default Youth Unity Cup image</option><option value="image" <?= ($heroSettings['type'] ?? '') === 'image' ? 'selected' : '' ?>>Uploaded image</option><option value="youtube" <?= ($heroSettings['type'] ?? '') === 'youtube' ? 'selected' : '' ?>>YouTube video</option><option value="video" <?= ($heroSettings['type'] ?? '') === 'video' ? 'selected' : '' ?>>Uploaded video file</option></select></div>
+                <div class="field-group"><label for="homepage-hero-youtube">YouTube link</label><input id="homepage-hero-youtube" name="hero_youtube_url" type="url" maxlength="500" placeholder="https://youtu.be/VIDEO_ID" value="<?= yuc_e($heroSettings['youtube_url'] ?? '') ?>" <?= $siteMode === 'demo' ? 'disabled' : '' ?>><small>Accepted links: youtube.com/watch, youtube.com/shorts, youtube.com/embed, and youtu.be. The embed uses the privacy-enhanced YouTube domain and loops muted.</small></div>
+                <div class="field-group"><label for="homepage-hero-image">Upload hero image</label><input id="homepage-hero-image" name="hero_image_file" type="file" accept="image/jpeg,image/png,image/webp" <?= $siteMode === 'demo' ? 'disabled' : '' ?>><small>JPEG, PNG, or WebP, up to 10 MB. The server validates the image, strips embedded metadata, resizes large images, and optimizes to WebP.</small></div>
+                <div class="field-group"><label for="homepage-hero-video">Upload hero video</label><input id="homepage-hero-video" name="hero_video_file" type="file" accept="video/mp4,video/webm" <?= $siteMode === 'demo' ? 'disabled' : '' ?>><small>MP4 or WebM, up to 25 MB (under 10 MB is best). Use a short, muted 1080p loop; MP4 must be web-optimized with fast-start enabled. Videos autoplay muted, loop continuously, and use range streaming.</small></div>
+                <div class="field-group"><label for="homepage-hero-alt">Image description for accessibility</label><input id="homepage-hero-alt" name="hero_image_alt" maxlength="160" value="<?= yuc_e($heroSettings['image_alt'] ?? 'Youth Unity Cup community football') ?>" <?= $siteMode === 'demo' ? 'disabled' : '' ?>></div>
+                <div class="form-actions"><button class="button button-primary" type="submit" <?= $siteMode === 'demo' ? 'disabled' : '' ?>>Save homepage hero</button></div>
+            </form>
+        </section>
+
     <?php else: ?>
         <section class="panel settings-panel"><div class="panel-kicker">SITE OPERATIONS</div><h2>Site, email &amp; security</h2><p class="panel-intro">Keep public details current, tune failed-login protection, and manage the SMTP connection. Leave the SMTP password blank to retain the saved password.</p>
             <form method="post" action="/admin/settings/save" class="form-stack">
@@ -300,9 +355,10 @@ $venues = is_array($venues ?? null) ? $venues : [];
                 <div class="settings-section-title">SMTP delivery</div>
                 <div class="form-grid"><div class="field-group"><label for="smtp-host">SMTP host</label><input id="smtp-host" name="smtp_host" maxlength="253" value="<?= yuc_e($mail['host'] ?? '') ?>" placeholder="smtp.example.com"></div><div class="field-group"><label for="smtp-port">SMTP port</label><input id="smtp-port" name="smtp_port" type="number" min="1" max="65535" value="<?= yuc_e($mail['port'] ?? 587) ?>"></div><div class="field-group"><label for="smtp-encryption">Encryption</label><select id="smtp-encryption" name="smtp_encryption"><?php foreach (['tls'=>'STARTTLS','ssl'=>'SSL/TLS','none'=>'None (not recommended)'] as $value=>$label): ?><option value="<?= yuc_e($value) ?>" <?= ($mail['encryption'] ?? 'tls') === $value ? 'selected' : '' ?>><?= yuc_e($label) ?></option><?php endforeach; ?></select></div><div class="field-group"><label for="smtp-username">SMTP username</label><input id="smtp-username" name="smtp_username" maxlength="190" value="<?= yuc_e($mail['username'] ?? '') ?>" autocomplete="off"></div><div class="field-group"><label for="smtp-password">SMTP password</label><input id="smtp-password" name="smtp_password" type="password" maxlength="1024" autocomplete="new-password" placeholder="Leave blank to keep current password"></div><div class="field-group"><label for="mail-from-email">Sender email</label><input id="mail-from-email" name="mail_from_email" type="email" maxlength="190" value="<?= yuc_e($mail['from_email'] ?? '') ?>"></div><div class="field-group"><label for="mail-from-name">Sender name</label><input id="mail-from-name" name="mail_from_name" maxlength="120" value="<?= yuc_e($mail['from_name'] ?? 'Youth Unity Cup') ?>"></div><div class="field-group"><label for="notifications-to">Alert recipient email</label><input id="notifications-to" name="notifications_to" type="email" maxlength="190" value="<?= yuc_e($mail['notifications_to'] ?? '') ?>"></div></div>
                 <div class="settings-section-title">PayHub shop payments</div>
-                <p class="panel-intro payhub-settings-note">Status: <strong><?= !empty($payHubConfigured) ? 'Secret key configured' : 'Not configured' ?></strong>. The secret stays server-side in the protected local configuration file and is never sent to the browser. Leave blank to keep the current key.</p>
-                <div class="field-group"><label for="payhub-secret-key">PayHub secret key</label><input id="payhub-secret-key" name="payhub_secret_key" type="password" maxlength="512" autocomplete="new-password" placeholder="Enter the PayHub secret key"></div>
-                <?php if (!empty($payHubConfigured)): ?><label class="settings-checkbox"><input type="checkbox" name="payhub_clear_secret" value="1"> Remove the saved PayHub key and disable new checkout</label><?php endif; ?>
+                <p class="panel-intro payhub-settings-note">Inline checkout status: <strong><?= $payHubConfigured ? 'Ready' : 'Missing one or both keys' ?></strong>. Secret: <?= $payHubSecretConfigured ? 'configured' : 'not configured' ?>. Public: <?= $payHubPublicConfigured ? 'configured' : 'not configured' ?>. The secret remains server-side in protected local configuration; the public key is sent only to pages that start PayHub checkout. Leave either field blank to keep its saved value.</p>
+                <div class="form-grid"><div class="field-group"><label for="payhub-public-key">PayHub public key</label><input id="payhub-public-key" name="payhub_public_key" type="password" maxlength="512" autocomplete="new-password" placeholder="Enter the PayHub public key"></div><div class="field-group"><label for="payhub-secret-key">PayHub secret key</label><input id="payhub-secret-key" name="payhub_secret_key" type="password" maxlength="512" autocomplete="new-password" placeholder="Enter the PayHub secret key"></div></div>
+                <?php if ($payHubPublicConfigured): ?><label class="settings-checkbox"><input type="checkbox" name="payhub_clear_public" value="1"> Remove the saved PayHub public key</label><?php endif; ?>
+                <?php if ($payHubSecretConfigured): ?><label class="settings-checkbox"><input type="checkbox" name="payhub_clear_secret" value="1"> Remove the saved PayHub secret key and disable payment verification</label><?php endif; ?>
                 <div class="form-actions"><button class="button button-primary" type="submit">Save settings</button><a class="button button-outline" href="/admin">Cancel</a></div>
             </form>
         </section>

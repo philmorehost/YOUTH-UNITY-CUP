@@ -2,12 +2,13 @@
 /** @var array<string,mixed>|null $order */
 /** @var string $verificationNotice */
 /** @var string $contactEmail */
+$demoMode = ($siteMode ?? 'production') === 'demo';
 ?>
 <section class="public-content-wrap shop-content-wrap">
     <div class="public-hero shop-hero shop-status-hero">
         <div class="eyebrow"><span class="eyebrow-line"></span>YOUTH UNITY CUP · OFFICIAL SHOP</div>
         <h1>Order <em>status.</em></h1>
-        <p>Payment status is checked directly with PayHub. A checkout redirect by itself is not proof of payment.</p>
+        <p><?= $demoMode ? 'Live shop actions are paused while this site is in Demo mode.' : 'Payment status is checked directly with PayHub. A popup callback by itself is not proof of payment.' ?></p>
     </div>
     <nav class="public-section-nav" aria-label="Tournament pages">
         <a href="/">Home</a><a href="/teams">Teams</a><a href="/fixtures">Fixtures</a><a href="/results">Results</a><a href="/venues">Venues</a><a href="/registration">Registration</a><a href="/shop" class="active">Official shop</a>
@@ -37,7 +38,7 @@
                 <?php endforeach; ?>
                 <div class="shop-order-total"><span>Order total</span><strong>₦<?= number_format((int) $order['total_kobo'] / 100, 2) ?></strong></div>
             </div>
-            <?php if ($status === 'pending_payment' && !empty($order['checkout_url']) && \Yuc\Services\PayHubClient::isTrustedCheckoutUrl((string) $order['checkout_url'])): ?><div class="shop-status-actions"><a class="button button-primary" href="<?= yuc_e($order['checkout_url']) ?>">Continue to PayHub checkout →</a><a class="button button-quiet" href="/shop/return?order=<?= rawurlencode((string) $order['reference']) ?>">Check payment status</a></div><?php elseif (in_array($status, ['pending_payment', 'paid_needs_review'], true)): ?><div class="shop-status-actions"><a class="button button-primary" href="/shop/return?order=<?= rawurlencode((string) $order['reference']) ?>">Check payment status</a></div><?php endif; ?>
+            <?php if ($demoMode && in_array($status, ['pending_payment', 'paid_needs_review'], true)): ?><div class="demo-checkout-note"><strong>Live payment actions are paused in Demo mode.</strong><span>Switch to Production to continue or verify this order, or contact the tournament team for help.</span></div><?php elseif ($status === 'pending_payment' && !empty($inlineCheckoutUrl)): ?><div class="shop-status-actions"><a class="button button-primary" href="<?= yuc_e($inlineCheckoutUrl) ?>">Return to secure PayHub checkout →</a><a class="button button-quiet" href="/shop/return?order=<?= rawurlencode((string) $order['reference']) ?>">Check payment status</a></div><?php elseif ($status === 'pending_payment' && !empty($order['checkout_url']) && \Yuc\Services\PayHubClient::isTrustedCheckoutUrl((string) $order['checkout_url'])): ?><div class="shop-status-actions"><a class="button button-primary" href="<?= yuc_e($order['checkout_url']) ?>">Continue to PayHub checkout →</a><a class="button button-quiet" href="/shop/return?order=<?= rawurlencode((string) $order['reference']) ?>">Check payment status</a></div><?php elseif (in_array($status, ['pending_payment', 'paid_needs_review'], true)): ?><div class="shop-status-actions"><a class="button button-primary" href="/shop/return?order=<?= rawurlencode((string) $order['reference']) ?>">Check payment status</a></div><?php endif; ?>
             <p class="shop-order-footnote">Keep this order reference for any follow-up. Status checks use the PayHub verification API; payment details are never exposed in the browser.</p>
         <?php endif; ?>
     </section>

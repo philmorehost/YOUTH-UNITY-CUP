@@ -12,18 +12,43 @@ final class PayHubClient
     public const CHECKOUT_HOST = 'merchant.payhub.com.ng';
 
     private string $secretKey;
+    private string $publicKey;
 
     /** @param array<string,mixed> $config */
     public function __construct(array $config)
     {
         $payments = is_array($config['payments'] ?? null) ? $config['payments'] : [];
         $secretKey = $payments['secret_key'] ?? '';
+        $publicKey = $payments['public_key'] ?? '';
         $this->secretKey = is_scalar($secretKey) ? trim((string) $secretKey) : '';
+        $this->publicKey = is_scalar($publicKey) ? trim((string) $publicKey) : '';
     }
 
     public function isConfigured(): bool
     {
-        return $this->secretKey !== '';
+        return self::isValidKey($this->secretKey);
+    }
+
+    public function isInlineConfigured(): bool
+    {
+        return $this->isConfigured() && self::isValidKey($this->publicKey);
+    }
+
+    public function publicKey(): string
+    {
+        return self::isValidKey($this->publicKey) ? $this->publicKey : '';
+    }
+
+    public static function createInlineReference(): string
+    {
+        return 'YUC-' . strtoupper(bin2hex(random_bytes(16)));
+    }
+
+    public static function isValidKey(string $credential): bool
+    {
+        return strlen($credential) >= 8
+            && strlen($credential) <= 512
+            && preg_match('/^[!-~]+$/D', $credential) === 1;
     }
 
     /** @param array{email:string,amount_kobo:int,name:string,phone:string} $customer @return array{authorization_url:string,reference:string} */
@@ -86,7 +111,7 @@ final class PayHubClient
             return false;
         }
 
-        return str_starts_with((string) ($parts['path'] ?? ''), '/checkout');
+        return in_array((string) ($parts['path'] ?? ''), ['/checkout', '/checkout.php'], true);
     }
 
     private function requireConfigured(): void
@@ -112,8 +137,9 @@ final class PayHubClient
             'Accept: application/json',
             'Authorization: Bearer ' . $this->secretKey,
         ];
+        $responseBody = '';
         $options = [
-            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_RETURNTRANSFER => false,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_CONNECTTIMEOUT => 5,
             CURLOPT_TIMEOUT => 20,
@@ -122,6 +148,13 @@ final class PayHubClient
             CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_CUSTOMREQUEST => $method,
+            CURLOPT_WRITEFUNCTION => static function ($curl, string $chunk) use (&$responseBody): int {
+                if (strlen($responseBody) + strlen($chunk) > 1048576) {
+                    return 0;
+                }
+                $responseBody .= $chunk;
+                return strlen($chunk);
+            },
         ];
         if ($method === 'POST' && $form !== null) {
             $headers[] = 'Content-Type: application/x-www-form-urlencoded';
@@ -129,16 +162,16 @@ final class PayHubClient
             $options[CURLOPT_POSTFIELDS] = http_build_query($form, '', '&', PHP_QUERY_RFC3986);
         }
         curl_setopt_array($handle, $options);
-        $body = curl_exec($handle);
+        $completed = curl_exec($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
         $errorNumber = curl_errno($handle);
         curl_close($handle);
 
-        if ($body === false || $errorNumber !== 0 || $status < 200 || $status >= 300) {
+        if ($completed !== true || $errorNumber !== 0 || $status < 200 || $status >= 300) {
             throw new RuntimeException('The PayHub request could not be completed.');
         }
         try {
-            $decoded = json_decode((string) $body, true, 32, JSON_THROW_ON_ERROR);
+            $decoded = json_decode($responseBody, true, 32, JSON_THROW_ON_ERROR);
         } catch (\JsonException) {
             throw new RuntimeException('PayHub returned an unreadable response.');
         }

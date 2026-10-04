@@ -93,8 +93,10 @@ final class SchemaInstaller
             'password_reset_tokens',
             'system_settings',
             'teams',
+            'team_players',
             'venues',
             'fixtures',
+            'site_mode_snapshots',
             'registrations',
         ];
     }

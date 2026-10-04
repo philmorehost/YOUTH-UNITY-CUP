@@ -8,6 +8,8 @@ use PDO;
 use Throwable;
 use Yuc\Core\View;
 use Yuc\Services\AuthService;
+use Yuc\Services\EnvironmentModeException;
+use Yuc\Services\EnvironmentModeService;
 use Yuc\Services\NotificationService;
 use Yuc\Services\TournamentService;
 
@@ -15,12 +17,14 @@ final class AdminController
 {
     private AuthService $auth;
     private NotificationService $notifications;
+    private EnvironmentModeService $environmentMode;
 
     /** @param array<string,mixed> $config */
     public function __construct(private PDO $pdo, private array $config)
     {
         $this->auth = new AuthService($pdo, $config);
         $this->notifications = new NotificationService($pdo, $config);
+        $this->environmentMode = new EnvironmentModeService($pdo);
     }
 
     public function showLogin(): void
@@ -176,8 +180,60 @@ final class AdminController
             'outboxCounts' => $outboxCounts,
             'recentNotifications' => $recentNotifications,
             'history' => $history,
+            'siteMode' => $this->environmentMode->currentMode(),
+            'appTimezone' => (string) ($this->config['app']['timezone'] ?? 'Africa/Lagos'),
             'flash' => yuc_take_flash(),
         ]);
+    }
+
+    public function switchSiteMode(): void
+    {
+        $admin = yuc_current_admin();
+        if ($admin === null) {
+            yuc_redirect('/admin/login');
+        }
+        if (!yuc_verify_csrf()) {
+            yuc_flash('error', 'Your dashboard session expired. Refresh the page and try again.');
+            yuc_redirect('/admin');
+        }
+
+        $userStatement = $this->pdo->prepare('SELECT status FROM users WHERE id=:id LIMIT 1');
+        $userStatement->execute(['id' => (int) $admin['id']]);
+        if ($userStatement->fetchColumn() !== 'active') {
+            unset($_SESSION['admin_user']);
+            yuc_flash('error', 'This administrator account is not active.');
+            yuc_redirect('/admin/login');
+        }
+
+        $targetMode = is_scalar($_POST['mode'] ?? null) ? (string) $_POST['mode'] : '';
+        if (!in_array($targetMode, ['demo', 'production'], true)) {
+            yuc_flash('error', 'Choose Demo or Production to switch the site mode.');
+            yuc_redirect('/admin');
+        }
+
+        try {
+            if ($targetMode === 'demo') {
+                $changed = $this->environmentMode->switchToDemo(
+                    (int) $admin['id'],
+                    (string) ($this->config['app']['timezone'] ?? 'Africa/Lagos')
+                );
+                yuc_flash('success', $changed
+                    ? 'Demo mode is active. Your live teams, rosters, venues and fixtures are safely backed up; registrations, payments, shop data, accounts and security records were left untouched.'
+                    : 'The site is already in Demo mode.');
+            } else {
+                $changed = $this->environmentMode->switchToProduction((int) $admin['id']);
+                yuc_flash('success', $changed
+                    ? 'Production mode is restored from the saved live snapshot. Demo tournament content was replaced; registrations, payments, shop data, accounts and security records remain untouched.'
+                    : 'The site is already in Production mode.');
+            }
+        } catch (Throwable $exception) {
+            error_log('Youth Unity Cup site mode change failed (' . get_class($exception) . ').');
+            $message = $exception instanceof EnvironmentModeException
+                ? $exception->getMessage()
+                : 'The site mode could not be changed. No successful restore was recorded. Check the server log and database migration.';
+            yuc_flash('error', $message);
+        }
+        yuc_redirect('/admin');
     }
 
     public function sendTestEmail(): void
@@ -188,6 +244,10 @@ final class AdminController
         }
         if (!yuc_verify_csrf()) {
             yuc_flash('error', 'Your dashboard session expired. Refresh the page and try again.');
+            yuc_redirect('/admin');
+        }
+        if ($this->environmentMode->isDemo()) {
+            yuc_flash('error', 'Test email activity is paused in Demo mode. Switch back to Production before sending administrative notifications.');
             yuc_redirect('/admin');
         }
 

@@ -206,6 +206,26 @@ CREATE TABLE IF NOT EXISTS teams (
     KEY idx_teams_group (group_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS team_players (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    team_id BIGINT UNSIGNED NOT NULL,
+    full_name VARCHAR(120) NOT NULL,
+    jersey_number TINYINT UNSIGNED NULL,
+    position VARCHAR(40) NOT NULL DEFAULT 'Player',
+    age TINYINT UNSIGNED NULL,
+    hometown VARCHAR(80) NOT NULL DEFAULT '',
+    bio VARCHAR(350) NOT NULL DEFAULT '',
+    photo_url VARCHAR(500) NOT NULL DEFAULT '',
+    avatar_variant TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_team_players_jersey (team_id, jersey_number),
+    KEY idx_team_players_team_status_number (team_id, status, jersey_number),
+    CONSTRAINT fk_team_players_team FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS venues (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     name VARCHAR(140) NOT NULL,
@@ -240,6 +260,15 @@ CREATE TABLE IF NOT EXISTS fixtures (
     CONSTRAINT fk_fixtures_home_team FOREIGN KEY (home_team_id) REFERENCES teams (id) ON DELETE RESTRICT,
     CONSTRAINT fk_fixtures_away_team FOREIGN KEY (away_team_id) REFERENCES teams (id) ON DELETE RESTRICT,
     CONSTRAINT fk_fixtures_venue FOREIGN KEY (venue_id) REFERENCES venues (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS site_mode_snapshots (
+    id TINYINT UNSIGNED NOT NULL,
+    snapshot_json LONGTEXT NOT NULL,
+    created_by BIGINT UNSIGNED NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT fk_site_mode_snapshot_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS registrations (

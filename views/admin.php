@@ -6,6 +6,9 @@
 /** @var list<array<string,mixed>> $recentNotifications */
 /** @var list<array<string,mixed>> $history */
 /** @var array{type:string,message:string}|null $flash */
+$siteMode = ($siteMode ?? 'production') === 'demo' ? 'demo' : 'production';
+$demoMode = $siteMode === 'demo';
+$appTimezone = (string) ($appTimezone ?? 'Africa/Lagos');
 ?>
 <section class="dashboard-wrap">
     <div class="dashboard-title-row">
@@ -30,20 +33,31 @@
         </div>
     <?php endif; ?>
 
+    <section class="environment-mode-card <?= $demoMode ? 'is-demo-mode' : 'is-production-mode' ?>">
+        <div class="environment-mode-copy"><span class="environment-mode-kicker">SITE ENVIRONMENT</span><h2><?= $demoMode ? 'Demo preview is active' : 'Production site is active' ?></h2><p>Demo mode swaps only the tournament directory — teams, player rosters, venues, fixtures, and scores. The live rows are saved as a private database snapshot and restored when you switch back. Registrations, payments, shop records, accounts, and security history are never cleared; public registration, checkout, and unrelated admin writes are paused during the demo.</p></div>
+        <div class="environment-mode-status"><span class="environment-status-dot"></span><strong><?= $demoMode ? 'DEMO' : 'PRODUCTION' ?></strong><small><?= $demoMode ? 'SAMPLE TOURNAMENT DATA' : 'LIVE TOURNAMENT DATA' ?></small></div>
+        <form method="post" action="/admin/site-mode" data-confirm="<?= $demoMode ? 'Switch back to Production and replace the demo tournament data with the saved live teams, rosters, venues, and fixtures?' : 'Switch to Demo? The current live teams, rosters, venues, and fixtures will be safely snapshotted and replaced by sample data until you switch back.' ?>">
+            <?= yuc_csrf_field() ?><input type="hidden" name="mode" value="<?= $demoMode ? 'production' : 'demo' ?>">
+            <button class="button <?= $demoMode ? 'button-primary' : 'button-outline' ?>" type="submit"><?= $demoMode ? 'Switch to Production' : 'Switch to Demo' ?><span aria-hidden="true">→</span></button>
+        </form>
+    </section>
+
     <section class="welcome-banner">
-        <div class="banner-copy"><span class="banner-kicker">YOUTH UNITY CUP / 2026</span><h2>Let’s make match day matter.</h2><p>Start with the essentials: site details, tournament content, and a verified notification channel.</p></div>
+        <div class="banner-copy"><span class="banner-kicker">YOUTH UNITY CUP / <?= yuc_e(yuc_current_year($appTimezone)) ?></span><h2>Let’s make match day matter.</h2><p>Start with the essentials: site details, tournament content, and a verified notification channel.</p></div>
         <div class="banner-emblem" aria-hidden="true"><span>Y</span><i></i></div>
         <div class="banner-stat"><strong>01</strong><small>CONTROL ROOM</small></div>
     </section>
 
     <nav class="ops-quick-nav" aria-label="Tournament management">
         <a href="/admin/teams"><span class="quick-nav-icon">♟</span><span><strong>Teams</strong><small><?= (int) ($tournamentCounts['teams'] ?? 0) ?> records</small></span><b>→</b></a>
+        <a href="/admin/players"><span class="quick-nav-icon">⚽</span><span><strong>Player profiles</strong><small><?= (int) ($tournamentCounts['players'] ?? 0) ?> squad members</small></span><b>→</b></a>
         <a href="/admin/venues"><span class="quick-nav-icon">⌖</span><span><strong>Venues</strong><small><?= (int) ($tournamentCounts['venues'] ?? 0) ?> records</small></span><b>→</b></a>
         <a href="/admin/fixtures"><span class="quick-nav-icon">◷</span><span><strong>Fixtures &amp; scores</strong><small><?= (int) ($tournamentCounts['fixtures'] ?? 0) ?> records</small></span><b>→</b></a>
         <a href="/admin/registrations"><span class="quick-nav-icon">♙</span><span><strong>Registrations</strong><small><?= (int) ($tournamentCounts['registrations'] ?? 0) ?> applications</small></span><b>→</b></a>
         <a href="/admin/transactions"><span class="quick-nav-icon">₦</span><span><strong>Transactions</strong><small><?= (int) ($tournamentCounts['transactions'] ?? 0) ?> records</small></span><b>→</b></a>
         <a href="/admin/products"><span class="quick-nav-icon">◈</span><span><strong>Shop products</strong><small>Catalog and stock</small></span><b>→</b></a>
         <a href="/admin/orders"><span class="quick-nav-icon">▣</span><span><strong>Shop orders</strong><small>Payment and fulfillment</small></span><b>→</b></a>
+        <a href="/admin/homepage-hero"><span class="quick-nav-icon">▣</span><span><strong>Homepage hero</strong><small>Image, YouTube, video</small></span><b>→</b></a>
         <a href="/admin/settings"><span class="quick-nav-icon">⚙</span><span><strong>Site &amp; security</strong><small>Details, SMTP, limits</small></span><b>→</b></a>
         <a href="/admin/security"><span class="quick-nav-icon">⌑</span><span><strong>Blocked IP access</strong><small><?= (int) ($tournamentCounts['blocked_ips'] ?? 0) ?> active blocks</small></span><b>→</b></a>
         <a href="/admin/activity"><span class="quick-nav-icon">≋</span><span><strong>Audit activity</strong><small>Recent system changes</small></span><b>→</b></a>
@@ -60,7 +74,7 @@
             <div class="metric-icon metric-blue" aria-hidden="true">✉</div>
             <div class="metric-label">EMAIL DELIVERY</div>
             <strong class="metric-main"><?= $emailConfigured ? 'SMTP ready' : 'Setup needed' ?></strong>
-            <span class="metric-foot"><?= $emailConfigured ? 'Send a test notice below' : 'Messages are safely queued' ?></span>
+            <span class="metric-foot"><?= $demoMode ? 'Test sends paused in Demo mode' : ($emailConfigured ? 'Send a test notice below' : 'Messages are safely queued') ?></span>
         </article>
         <article class="metric-card">
             <div class="metric-icon metric-navy" aria-hidden="true">↗</div>
@@ -119,9 +133,10 @@
                     <?php endforeach; ?>
                 <?php endif; ?>
             </div>
+            <?php if ($demoMode): ?><p class="panel-intro">Test email sends are paused during the tournament demo.</p><?php endif; ?>
             <form method="post" action="/admin/email-test" class="test-email-form">
                 <?= yuc_csrf_field() ?>
-                <button class="button button-primary button-full" type="submit">Send a test notification <span aria-hidden="true">→</span></button>
+                <button class="button button-primary button-full" type="submit" <?= $demoMode ? 'disabled' : '' ?>><?= $demoMode ? 'Test notification paused' : 'Send a test notification' ?> <span aria-hidden="true">→</span></button>
             </form>
             <p class="outbox-help">If SMTP is unavailable, queued messages can be retried with <code>php bin/send-notifications.php</code>.</p>
         </section>
