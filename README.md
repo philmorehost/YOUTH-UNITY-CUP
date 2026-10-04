@@ -5,7 +5,7 @@ A vanilla PHP, MVC-style platform for the Youth Unity Cup tournament website. Cl
 ## Installer stages
 
 1. **Welcome & system checks** — checks PHP 8.1+, required extensions, and protected folder permissions; verifies the submitted project key server-side against the PMH License Manager API over HTTPS.
-2. **Database & schema** — connects to an existing MySQL database and creates the tables with static, non-destructive `CREATE TABLE IF NOT EXISTS` statements. It seeds the ten venue-zone names already in the site; live team names and schedules remain admin-managed. A separate, reversible Demo mode provides a clearly labelled 16-team sample tournament. Application queries use PDO prepared statements.
+2. **Database & schema** — connects to an existing MySQL database and creates the tables with static, non-destructive `CREATE TABLE IF NOT EXISTS` statements. Installed sites also compare their tables against the canonical schema at request startup and auto-create missing declared tables without dropping existing data. It seeds the ten venue-zone names already in the site; live team names and schedules remain admin-managed. A separate, reversible Demo mode provides a clearly labelled 16-team sample tournament. Application queries use PDO prepared statements.
 3. **Admin & email** — creates the first super-admin with PHP password hashing and optionally configures SMTP delivery.
 4. **Completion** — provides the sign-in route and a first-login checklist.
 
@@ -38,7 +38,7 @@ Open `http://localhost:8080/`. The first request redirects to `/install`. Licens
 2. Enable HTTPS and the Apache rewrite module if deploying with the supplied `public/.htaccess`.
 3. Create an empty MySQL/MariaDB database and a least-privilege database account.
 4. Visit `/install`, complete each stage, and sign in at `/admin/login`.
-5. For an already-installed site upgrading from an earlier schema, back up the database and run `php /absolute/path/to/YOUTH-UNITY-CUP/bin/migrate-schema.php` once with the configured database account before using the new roster or demo-mode controls. The migration uses non-destructive `CREATE TABLE IF NOT EXISTS` statements, adds missing transaction/provider/archive and shop-verification fields, and creates the team-player roster and protected site-mode snapshot tables. It does not drop existing live data.
+5. For an already-installed site, missing tables listed in `database/schema.mysql.sql` are created automatically on the next application request. The runtime database account must have permission to create tables for this repair to work. Back up the database and run `php /absolute/path/to/YOUTH-UNITY-CUP/bin/migrate-schema.php` for upgrades that add or change existing columns or indexes; that additive CLI updater does not drop existing live data.
 6. Configure the PayHub public and secret keys and webhook endpoint as described in **PayHub shop setup** below before opening `/shop` for real orders.
 7. Confirm SMTP delivery from the dashboard's **Send a test notification** action. Without SMTP, mail remains in the database outbox and is not silently discarded.
 8. Schedule the outbox worker (for example once per minute), running as the same OS account that serves PHP, to retry temporary SMTP failures:
@@ -67,7 +67,7 @@ Use **Admin → Homepage hero** to choose the default sports artwork, upload an 
 
 The Admin dashboard includes an explicit **Switch to Demo** / **Switch to Production** control. Switching to Demo takes a transactional database snapshot of the live `teams`, `team_players`, `venues`, and `fixtures` rows, then installs 16 sample teams across Groups A–D, 11 sample player profiles per team, eight sample community venues, and 24 round-robin group fixtures (including sample scores). Public pages are visibly labelled Demo; live registrations, PayHub checkout, and non-tournament admin writes are paused.
 
-Switching back to Production restores the exact saved tournament rows and IDs from the snapshot in one transaction, then removes the snapshot only after the restore succeeds. Registration, transaction/payment, shop, admin-account, login, and security-history tables are never cleared by this switch. Keep a normal database backup before deploying migrations or enabling the mode control. Install the additive schema first with `bin/migrate-schema.php` on an already-installed site.
+Switching back to Production restores the exact saved tournament rows and IDs from the snapshot in one transaction, then removes the snapshot only after the restore succeeds. Registration, transaction/payment, shop, admin-account, login, and security-history tables are never cleared by this switch. Keep a normal database backup before deploying column/index migrations or enabling the mode control. Missing tables are self-created from the canonical schema; use `bin/migrate-schema.php` for additive changes to existing columns or indexes.
 
 ## What is included
 
@@ -81,7 +81,7 @@ Switching back to Production restores the exact saved tournament rows and IDs fr
 - Admin settings for site title/contact, time zone, SMTP delivery, server-side PayHub secret/public keys, login-attempt thresholds, and IP-block duration; searchable, paginated `/admin/activity` audit history
 - CSRF-protected, four-stage installer
 - Version/extension/permission checks, including `fileinfo` and GD WebP support for secure hero-image uploads
-- MySQL schema for admins, login history, IP throttling, audit events, notifications, transactions, PayHub provider references, password-reset tokens, settings, shop products/orders/order-item snapshots, teams, venues, fixtures, and public registrations
+- Canonical MySQL schema for admins, login history, IP throttling, audit events, notifications, transactions, PayHub provider references, password-reset tokens, settings, shop products/orders/order-item snapshots, teams/players, venues, fixtures, and public registrations; missing declared tables are auto-created without dropping existing tables
 - Argon/Bcrypt-compatible PHP password hashing (`PASSWORD_DEFAULT`)
 - Session ID rotation, secure/HTTP-only/SameSite cookies, configurable temporary IP throttling, and an admin page to review or release active blocks
 - Successful login and security-threshold email alerts; audit/history records for all sign-in outcomes; one-time email password resets
@@ -104,4 +104,4 @@ Switching back to Production restores the exact saved tournament rows and IDs fr
 
 ## Validation before release
 
-Run PHP's syntax checker on every PHP file, `php tests/payhub-security.php`, `php tests/hero-media-security.php`, `php tests/shop-template-smoke.php`, `php tests/admin-management-smoke.php`, and `php tests/public-tournament-smoke.php`; complete the installer against a disposable MySQL database, verify Demo → Production snapshot restoration on test data, test a successful SMTP message and the queued/retry path, and exercise PayHub inline checkout, a signed webhook, and server-side payment-return verification before production deployment. Test hero image/video uploads and browser playback on the production-like web server. Never test schema changes or mode switching against the live tournament database. Never test schema changes or mode switching against the live tournament database.
+Run PHP's syntax checker on every PHP file, `php tests/schema-self-heal-smoke.php`, `php tests/payhub-security.php`, `php tests/hero-media-security.php`, `php tests/shop-template-smoke.php`, `php tests/admin-management-smoke.php`, and `php tests/public-tournament-smoke.php`; complete the installer against a disposable MySQL database, verify Demo → Production snapshot restoration on test data, test a successful SMTP message and the queued/retry path, and exercise PayHub inline checkout, a signed webhook, and server-side payment-return verification before production deployment. Test hero image/video uploads and browser playback on the production-like web server. Never test schema changes or mode switching against the live tournament database.

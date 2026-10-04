@@ -1,5 +1,8 @@
--- Youth Unity Cup initial schema (MySQL 8.0+ / MariaDB 10.5+)
--- This file is applied by the installer; existing tables are not dropped.
+-- Youth Unity Cup canonical schema (MySQL 8.0+ / MariaDB 10.5+)
+-- The installer and runtime self-healer create missing tables from these declarations only.
+-- Keep every application table here and order new tables after their referenced parent tables.
+-- Existing tables and their data are never dropped.
+-- Changes to existing columns and indexes still use the additive CLI schema updater.
 
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

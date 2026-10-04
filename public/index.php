@@ -11,6 +11,7 @@ use Yuc\Core\ConfigStore;
 use Yuc\Core\Database;
 use Yuc\Core\Router;
 use Yuc\Core\View;
+use Yuc\Services\SchemaInstaller;
 
 require dirname(__DIR__) . '/app/bootstrap.php';
 
@@ -54,6 +55,7 @@ try {
                     throw new RuntimeException('The saved application configuration is incomplete.');
                 }
                 $pdo = Database::connect($config['database']);
+                (new SchemaInstaller())->ensureMissingTables($pdo);
             }
             return $pdo;
         };

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Yuc\Core\ConfigStore;
 use Yuc\Core\Database;
 use Yuc\Services\NotificationService;
+use Yuc\Services\SchemaInstaller;
 
 if (PHP_SAPI !== 'cli') {
     http_response_code(404);
@@ -21,6 +22,7 @@ if (!ConfigStore::isInstalled($config) || !is_array($config)) {
 
 try {
     $pdo = Database::connect((array) $config['database']);
+    (new SchemaInstaller())->ensureMissingTables($pdo);
     $result = (new NotificationService($pdo, $config))->dispatchQueued(50);
     printf(
         "Notification run complete: %d sent, %d still queued, %d permanently failed.\n",

@@ -9,29 +9,29 @@ use RuntimeException;
 
 final class SchemaInstaller
 {
+    /**
+     * Create only tables declared in the canonical schema that are absent from
+     * the connected database. This is safe to run at request startup: it does
+     * not drop, truncate, or rebuild existing tables.
+     *
+     * @return list<string> Names of tables created during this call.
+     */
+    public function ensureMissingTables(PDO $pdo): array
+    {
+        return $this->createMissingTables($pdo, $this->tableStatements());
+    }
+
+    /** @return list<string> */
+    public function declaredTables(): array
+    {
+        return array_keys($this->tableStatements());
+    }
+
     /** @return list<string> */
     public function install(PDO $pdo): array
     {
-        $file = YUC_ROOT . '/database/schema.mysql.sql';
-        if (!is_file($file) || !is_readable($file)) {
-            throw new RuntimeException('The database schema file is missing or unreadable.');
-        }
-
-        $sql = file_get_contents($file);
-        if ($sql === false) {
-            throw new RuntimeException('The database schema could not be read.');
-        }
-
-        // The checked-in schema contains ordinary CREATE TABLE statements,
-        // not stored procedures; splitting on statement-ending semicolons is safe.
-        $statements = preg_split('/;\s*(?:\r?\n|$)/', $sql) ?: [];
-        foreach ($statements as $statement) {
-            $statement = trim($statement);
-            if ($statement === '') {
-                continue;
-            }
-            $pdo->exec($statement);
-        }
+        $tableStatements = $this->tableStatements();
+        $this->createMissingTables($pdo, $tableStatements);
 
         $transactionColumns = [
             'recipient_email' => "ALTER TABLE transactions ADD recipient_email VARCHAR(190) NOT NULL DEFAULT '' AFTER user_id",
@@ -79,25 +79,69 @@ final class SchemaInstaller
             }
         }
 
-        return [
-            'users',
-            'login_attempts',
-            'login_history',
-            'ip_blocks',
-            'audit_logs',
-            'notification_outbox',
-            'transactions',
-            'shop_products',
-            'shop_orders',
-            'shop_order_items',
-            'password_reset_tokens',
-            'system_settings',
-            'teams',
-            'team_players',
-            'venues',
-            'fixtures',
-            'site_mode_snapshots',
-            'registrations',
-        ];
+        return array_keys($tableStatements);
+    }
+
+    /** @return array<string,string> Table names mapped to their CREATE TABLE statements. */
+    private function tableStatements(): array
+    {
+        $file = YUC_ROOT . '/database/schema.mysql.sql';
+        if (!is_file($file) || !is_readable($file)) {
+            throw new RuntimeException('The database schema file is missing or unreadable.');
+        }
+        $sql = file_get_contents($file);
+        if ($sql === false) {
+            throw new RuntimeException('The database schema could not be read.');
+        }
+
+        // The canonical schema contains ordinary CREATE TABLE statements, not
+        // stored procedures; splitting at statement-ending semicolons is safe.
+        $statements = preg_split('/;\s*(?:\r?\n|$)/', $sql) ?: [];
+        $tables = [];
+        foreach ($statements as $statement) {
+            $statement = trim($statement);
+            if ($statement === ''
+                || preg_match('/\bCREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+`?([A-Za-z0-9_]+)`?/i', $statement, $matches) !== 1) {
+                continue;
+            }
+            $tableName = $matches[1];
+            $key = strtolower($tableName);
+            if (isset($tables[$key])) {
+                throw new RuntimeException('The database schema declares the same table more than once.');
+            }
+            $tables[$key] = $statement;
+        }
+        if ($tables === []) {
+            throw new RuntimeException('The database schema does not declare any application tables.');
+        }
+        return $tables;
+    }
+
+    /** @param array<string,string> $tableStatements @return list<string> */
+    private function createMissingTables(PDO $pdo, array $tableStatements): array
+    {
+        $existingNames = $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
+        $existing = [];
+        foreach ($existingNames as $name) {
+            if (is_scalar($name)) {
+                $existing[strtolower((string) $name)] = true;
+            }
+        }
+
+        $created = [];
+        foreach ($tableStatements as $key => $statement) {
+            if (isset($existing[$key])) {
+                continue;
+            }
+            // IF NOT EXISTS also makes concurrent first requests safe if they
+            // discover and create the same missing table at the same time.
+            $pdo->exec($statement);
+            $existing[$key] = true;
+            $created[] = $key;
+        }
+        if ($created !== []) {
+            error_log('Youth Unity Cup automatically created missing schema tables: ' . implode(', ', $created));
+        }
+        return $created;
     }
 }
