@@ -614,3 +614,204 @@ body{background:radial-gradient(ellipse at 5% 4%,rgba(96,165,224,.11),transparen
 @media(max-width:900px){.shop-product-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.shop-customer-fields{grid-template-columns:1fr}.shop-orders-table{min-width:1080px}}
 @media(max-width:600px){.shop-panel,.shop-status-panel{padding:16px 12px}.shop-product-grid{grid-template-columns:1fr;gap:10px}.shop-product-card{display:grid;grid-template-columns:42px minmax(0,1fr);gap:0 12px;padding:13px}.shop-product-mark{grid-row:1/3;margin:0}.shop-product-copy p{min-height:0}.shop-product-bottom{grid-column:1/-1;margin-top:8px}.shop-customer-fields{padding:14px 11px}.shop-customer-fields .form-grid{grid-template-columns:1fr}.shop-checkout-actions{align-items:stretch;flex-direction:column}.shop-checkout-actions .button{width:100%}.shop-return-note{align-items:flex-start;flex-direction:column}.shop-order-heading{align-items:flex-start;flex-direction:column}.shop-status-actions{flex-direction:column}.shop-status-actions .button{width:100%}}
 .shop-review-reason{color:#986423!important;font-weight:700}
+
+/* Readability pass: raise small utility text without changing the visual hierarchy. */
+body{font-size:16px;line-height:1.6}
+.topbar-note{font-size:11px}
+.site-footer{font-size:12px}
+.footer-brand{font-size:11px}
+.eyebrow,.login-kicker{font-size:11px}
+.panel-kicker{font-size:10px}
+.lede{font-size:16px}
+.panel-intro{font-size:14px}
+.alert{font-size:14px}
+.stepper-copy strong{font-size:12px}
+.stepper-copy small{font-size:10px}
+.readiness-pill{font-size:9px}
+.requirement-detail strong{font-size:12px}
+.requirement-detail small,.requirement-state{font-size:10px}
+.requirements-note p{font-size:12px}
+.form-stack label,.field-group label{font-size:12px}
+input,select,textarea{font-size:14px}
+.button{font-size:13px}
+.field-group small,.privacy-note{font-size:11px}
+.ops-header .lede,.dashboard-title-row .lede{font-size:15px}
+.ops-nav a,.public-section-nav a{min-height:40px;font-size:12px}
+.ops-quick-nav strong{font-size:13px}
+.ops-quick-nav small{font-size:10px}
+.ops-form-panel h2,.ops-table-panel h2,.settings-panel h2{font-size:30px}
+.ops-form-panel .panel-intro,.settings-panel .panel-intro{font-size:13px}
+.ops-form-panel .field-group label,.settings-panel .field-group label{font-size:12px}
+.ops-form-panel input,.ops-form-panel select,.ops-form-panel textarea,.settings-panel input,.settings-panel select{min-height:44px;font-size:14px}
+.ops-form-panel .button,.settings-panel .button,.inline-status-form .button{min-height:40px;font-size:12px}
+.ops-table th{font-size:9px}
+.ops-table td,.data-table td{font-size:12px}
+.ops-table td strong,.data-table td:first-child strong{font-size:12px}
+.ops-table td small,.data-table td:first-child small{font-size:10px}
+.table-action{font-size:11px}
+.inline-status-form select{min-height:36px;font-size:11px}
+.inline-status-form .button{font-size:11px}
+.outcome-badge{font-size:8px}
+.settings-section-title{font-size:12px}
+.inline-hint{font-size:10px}
+.audit-toolbar .field-group label{font-size:11px}
+.audit-toolbar input,.audit-toolbar select{font-size:13px}
+.audit-event-tag{font-size:9px}
+.audit-context summary{font-size:10px}
+.audit-context pre{font-size:10px}
+.audit-pagination{font-size:11px}
+.outbox-copy strong{font-size:11px}
+.outbox-copy small{font-size:9px}
+.security-footnote,.first-login-note p,.first-login-note strong{font-size:10px}
+.public-hero>p{font-size:15px}
+.public-match-meta,.public-match-footer{font-size:10px}
+.public-match-meta span:first-child{font-size:9px}
+.public-match-teams small{font-size:9px}
+.public-match-teams strong{font-size:14px}
+.public-empty strong{font-size:15px}
+.public-empty p,.public-contact{font-size:12px}
+.public-team-card>div>span,.venue-zone-tag{font-size:9px}
+.public-venue-card p{font-size:12px}
+.public-page-footer{font-size:11px}
+.public-registration-panel .panel-intro{font-size:13px}
+.public-registration-form .field-group label{font-size:12px}
+.public-registration-form input,.public-registration-form select,.public-registration-form textarea{min-height:44px;font-size:14px}
+.registration-aside li p{font-size:12px}
+.shop-product-sku{font-size:9px}
+.shop-product-copy p{font-size:12px}
+.shop-product-bottom label,.shop-product-bottom small{font-size:10px}
+.shop-product-bottom input{font-size:14px}
+.shop-customer-fields .panel-intro{font-size:12px}
+.shop-customer-fields .field-group span{font-size:10px}
+.shop-checkout-actions>span,.shop-payment-warning{font-size:11px}
+.shop-order-state p,.shop-order-line,.shop-order-total{font-size:12px}
+.shop-order-line small,.shop-order-footnote{font-size:10px}
+.payhub-settings-note{font-size:12px}
+.settings-checkbox{font-size:11px}
+.home-hero{min-height:330px}
+.home-hero h1{max-width:780px;font-size:clamp(58px,7vw,88px)}
+.home-hero .eyebrow{font-size:11px}
+.home-hero-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.home-hero-actions .button-outline{border-color:rgba(255,255,255,.42);background:rgba(255,255,255,.08);color:#fff}
+.home-explore-panel{padding:28px}
+.home-link-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.home-link-card{min-height:170px;display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:18px;border:1px solid #e2eaf1;border-radius:17px;background:linear-gradient(145deg,#fff,#f8fafc);box-shadow:0 7px 20px rgba(16,40,68,.045);text-decoration:none;transition:transform .18s,border-color .18s,box-shadow .18s}
+.home-link-card:hover{transform:translateY(-3px);border-color:#cbdbe9;box-shadow:0 13px 28px rgba(16,40,68,.085)}
+.home-link-card>span{width:37px;height:37px;display:grid;place-items:center;border-radius:11px;background:#edf5fc;color:#326b9c;font-size:19px}
+.home-link-card:nth-child(3n+2)>span{background:#fff2e8;color:#d96123}
+.home-link-card:nth-child(3n)>span{background:#eaf6f0;color:#18805c}
+.home-link-card strong{color:#263e5a;font-size:17px}
+.home-link-card small{color:#75869a;font-size:12px;line-height:1.5}
+.home-link-card b{margin-top:auto;color:#346a96;font-size:11px}
+.login-card-top{font-size:10px}
+.login-story>p{font-size:14px}
+.login-stats small{font-size:9px}
+.login-card-lede{font-size:13px}
+.login-form .field-group label{font-size:12px}
+.login-form input{font-size:14px}
+.password-toggle{font-size:11px}
+.login-security,.public-site-link{font-size:11px}
+.login-card .alert{font-size:13px}
+.banner-kicker{font-size:10px}
+.banner-copy p{font-size:13px}
+.banner-stat small{font-size:9px}
+.metric-label{font-size:10px}
+.metric-foot{font-size:11px}
+.table-caption,.outbox-count{font-size:9px}
+.notification-panel .panel-intro{font-size:12px}
+.outbox-copy strong{font-size:12px}
+.outbox-copy small{font-size:10px}
+.outbox-error,.outbox-help,.empty-outbox{font-size:10px}
+.first-login-note strong{font-size:11px}
+.first-login-note p{font-size:10px}
+.first-login-tag{font-size:9px}
+.security-footnote{font-size:10px}
+.data-table td.mono-cell{font-size:10px!important}
+.outcome-badge{font-size:9px}
+@media(max-width:900px){.home-link-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){
+ body{font-size:15px}
+ .topbar-note{font-size:0}
+ .site-footer{font-size:11px}
+ .panel-intro,.ops-header .lede,.dashboard-title-row .lede{font-size:13px}
+ .ops-header .lede{font-size:13px}
+ .ops-nav a,.public-section-nav a{min-height:38px;padding:0 10px;font-size:11px}
+ .ops-quick-nav strong{font-size:12px}
+ .ops-quick-nav small{font-size:9px}
+ .ops-form-panel .field-group label,.settings-panel .field-group label{font-size:12px}
+ .ops-form-panel input,.ops-form-panel select,.ops-form-panel textarea,.settings-panel input,.settings-panel select{font-size:14px}
+ .ops-table th{font-size:8px}
+ .ops-table td,.data-table td{font-size:11px}
+ .ops-table td strong,.data-table td:first-child strong{font-size:11px}
+ .ops-table td small,.data-table td:first-child small{font-size:9px}
+ .table-action{font-size:10px}
+ .inline-status-form select{font-size:10px}
+ .outcome-badge{font-size:8px}
+ .public-hero h1{font-size:clamp(42px,12vw,58px)}
+ .public-hero>p{font-size:12px}
+ .public-hero .eyebrow{font-size:9px}
+ .public-data-panel .panel-intro,.public-registration-panel .panel-intro{font-size:12px}
+ .public-match-teams strong{font-size:13px}
+ .public-empty strong{font-size:14px}
+ .public-empty p,.public-contact{font-size:11px}
+ .public-page-footer{font-size:10px}
+ .public-registration-form .field-group label{font-size:12px}
+ .public-registration-form input,.public-registration-form select,.public-registration-form textarea{font-size:14px}
+ .home-hero{min-height:300px;padding:25px 18px}
+ .home-hero h1{max-width:78%;font-size:clamp(43px,12vw,58px)}
+ .home-hero>p{max-width:82%;font-size:12px}
+ .home-hero .eyebrow{font-size:9px}
+ .home-hero .public-hero-stamp{right:13px;bottom:14px;width:58px;height:58px;font-size:17px}
+ .home-hero .public-hero-stamp small{font-size:5px}
+ .home-explore-panel{padding:18px 13px}
+ .home-link-grid{grid-template-columns:1fr;gap:9px}
+ .home-link-card{min-height:0;display:grid;grid-template-columns:39px minmax(0,1fr);gap:2px 11px;padding:12px}
+ .home-link-card>span{grid-row:1/4}
+ .home-link-card strong{font-size:15px}
+ .home-link-card small{font-size:11px}
+ .home-link-card b{grid-column:2;margin-top:3px;font-size:10px}
+ .shop-product-copy p{font-size:12px}
+ .shop-product-bottom input{font-size:14px}
+ .shop-order-line,.shop-order-total{font-size:11px}
+}
+.data-table th{font-size:9px}
+@media(max-width:600px){
+ .login-card-top{font-size:9px}
+ .login-story>p{font-size:12px}
+ .login-stats small{font-size:8px}
+ .login-card-lede{font-size:12px}
+ .login-form .field-group label{font-size:12px}
+ .login-form input{font-size:14px}
+ .password-toggle{font-size:10px}
+ .login-security,.public-site-link{font-size:10px}
+ .login-card .alert{font-size:12px}
+ .banner-kicker{font-size:9px}
+ .banner-copy p{font-size:11px}
+ .banner-stat small{font-size:7px}
+ .metric-label{font-size:9px}
+ .metric-foot{font-size:10px}
+ .table-caption,.outbox-count{font-size:8px}
+ .notification-panel .panel-intro{font-size:11px}
+ .outbox-copy strong{font-size:11px}
+ .outbox-copy small{font-size:9px}
+ .outbox-error,.outbox-help,.empty-outbox{font-size:9px}
+ .first-login-note strong{font-size:10px}
+ .first-login-note p{font-size:9px}
+ .first-login-tag{font-size:8px}
+ .security-footnote{font-size:9px}
+ .data-table th{font-size:8px}
+ .data-table td{font-size:11px}
+ .data-table td:first-child strong{font-size:11px}
+ .data-table td:first-child small{font-size:9px}
+ .data-table td.mono-cell{font-size:9px!important}
+ .public-hero .public-hero-stamp{right:13px;bottom:14px;width:58px;height:58px;font-size:17px}
+ .public-hero .public-hero-stamp small{font-size:5px}
+}
+.dashboard-actions .button{font-size:13px}
+@media(max-width:600px){
+ .dashboard-actions .button,.ops-header-actions .button{font-size:11px}
+ .settings-panel .form-actions .button,.form-actions .button{font-size:12px}
+ .ops-table-panel .readiness-pill{font-size:8px}
+ .banner-stat small{font-size:8px}
+ .home-hero .public-hero-stamp small{font-size:6px}
+}

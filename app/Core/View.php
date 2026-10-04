@@ -24,6 +24,7 @@ final class View
         $title = (string) ($data['title'] ?? 'Youth Unity Cup');
         $bodyClass = (string) ($data['bodyClass'] ?? '');
         $topNote = (string) ($data['topNote'] ?? 'TOURNAMENT ADMINISTRATION');
+        $description = (string) ($data['description'] ?? 'Youth Unity Cup administration and installation portal.');
 
         ob_start();
         require $viewFile;

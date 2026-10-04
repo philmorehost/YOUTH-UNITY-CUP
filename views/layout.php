@@ -2,6 +2,7 @@
 /** @var string $title */
 /** @var string $bodyClass */
 /** @var string $topNote */
+/** @var string $description */
 /** @var string $content */
 ?>
 <!doctype html>
@@ -10,7 +11,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#0b2545">
-    <meta name="description" content="Youth Unity Cup administration and installation portal.">
+    <meta name="description" content="<?= yuc_e($description) ?>">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <title><?= yuc_e($title) ?></title>
     <link rel="preconnect" href="https://fonts.googleapis.com">

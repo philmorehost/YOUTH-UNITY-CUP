@@ -53,7 +53,14 @@ try {
                     return;
                 }
             }
-            View::render('not-found', ['title' => 'Youth Unity Cup']);
+            $siteTitle = trim((string) ($config['app']['site_title'] ?? 'Youth Unity Cup'));
+            View::render('public-home', [
+                'title' => ($siteTitle !== '' ? $siteTitle : 'Youth Unity Cup') . ' · Official site',
+                'topNote' => 'OFFICIAL TOURNAMENT INFORMATION',
+                'bodyClass' => 'public-data-page',
+                'description' => 'The official Youth Unity Cup home for tournament news, teams, fixtures, results, venues, registration, and merchandise.',
+                'siteTitle' => $siteTitle,
+            ]);
         });
         $router->get('/install', static function (): void {
             yuc_redirect('/admin/login');

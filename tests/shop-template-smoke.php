@@ -159,4 +159,18 @@ if (!str_contains($settings, 'PayHub shop payments') || !str_contains($settings,
     throw new RuntimeException('Admin settings template did not render PayHub credential controls.');
 }
 
-fwrite(STDOUT, "Shop and admin template smoke checks passed.\n");
+$home = renderTemplate('public-home', [
+    'title' => 'Youth Unity Cup · Official site',
+    'topNote' => 'OFFICIAL TOURNAMENT INFORMATION',
+    'bodyClass' => 'public-data-page',
+    'description' => 'The official Youth Unity Cup home.',
+    'siteTitle' => 'Youth <Unity> Cup',
+]);
+if (!str_contains($home, 'One community.') || !str_contains($home, 'Youth &lt;Unity&gt; Cup')
+    || !str_contains($home, 'name="description" content="The official Youth Unity Cup home."')
+    || !str_contains($home, 'href="/fixtures"') || !str_contains($home, 'href="/registration"')
+    || str_contains($home, 'THAT ROUTE ISN’T ON THE FIXTURE LIST')) {
+    throw new RuntimeException('Root landing fallback template did not render the home page.');
+}
+
+fwrite(STDOUT, "Shop, admin, and home template smoke checks passed.\n");
