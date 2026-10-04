@@ -35,7 +35,9 @@ final class ShopController
             'title' => 'Official shop · ' . $settings['site_title'],
             'topNote' => 'YOUTH UNITY CUP OFFICIAL SHOP',
             'bodyClass' => 'public-data-page shop-page',
-            'products' => $this->shop->publicProducts($siteMode !== 'demo'),
+            'products' => $siteMode === 'demo'
+                ? ShopService::demoProducts()
+                : $this->shop->publicProducts(),
             'payHubConfigured' => $this->payHub->isInlineConfigured(),
             'contactEmail' => $settings['contact_email'],
             'siteMode' => $siteMode,

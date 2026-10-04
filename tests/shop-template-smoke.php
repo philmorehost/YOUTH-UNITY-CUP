@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Yuc\Core\View;
+use Yuc\Services\ShopService;
 
 require dirname(__DIR__) . '/app/bootstrap.php';
 
@@ -33,6 +34,50 @@ $shop = renderTemplate('shop', [
 ]);
 if (!str_contains($shop, 'Unity Cup Shirt') || !str_contains($shop, 'Continue to PayHub')) {
     throw new RuntimeException('Public shop template did not render the catalog and checkout.');
+}
+
+$demoProducts = ShopService::demoProducts();
+$demoSkus = array_column($demoProducts, 'sku');
+$demoIds = array_column($demoProducts, 'id');
+if (count($demoProducts) !== 8
+    || count(array_unique($demoSkus)) !== count($demoProducts)
+    || array_filter($demoSkus, static fn (string $sku): bool => !str_starts_with($sku, 'DEMO-')) !== []
+    || array_filter($demoIds, static fn (int $id): bool => $id >= 0) !== []) {
+    throw new RuntimeException('Demo shop products must be unique, preview-labelled and impossible to confuse with stored product IDs.');
+}
+foreach ($demoProducts as $product) {
+    if ($product['price_kobo'] < 1 || $product['stock_quantity'] < 1 || $product['name'] === '') {
+        throw new RuntimeException('Every demo shop product needs a name, sample price and sample stock.');
+    }
+}
+$shopController = file_get_contents(dirname(__DIR__) . '/app/Controllers/ShopController.php');
+if (!is_string($shopController) || !str_contains($shopController, 'ShopService::demoProducts()')) {
+    throw new RuntimeException('The shop controller does not use the preview catalog in Demo mode.');
+}
+$demoShop = renderTemplate('shop', [
+    'title' => 'Official shop · Youth Unity Cup',
+    'topNote' => 'YOUTH UNITY CUP OFFICIAL SHOP',
+    'bodyClass' => 'public-data-page shop-page',
+    'siteMode' => 'demo',
+    'products' => $demoProducts,
+    'payHubConfigured' => true,
+    'contactEmail' => 'shop@example.test',
+    'flash' => null,
+    'lastOrderAvailable' => false,
+    'oldForm' => [],
+]);
+if (substr_count($demoShop, '<article class="shop-product-card">') !== 8
+    || !str_contains($demoShop, 'Navy and Lime Match Jersey')
+    || !str_contains($demoShop, 'Size 5 Training Football')
+    || !str_contains($demoShop, 'Your live catalogue and stock remain untouched')
+    || !str_contains($demoShop, 'DEMO CHECKOUT PAUSED')
+    || str_contains($demoShop, 'Continue to PayHub')
+    || str_contains($demoShop, 'name="customer_name"')
+    || !str_contains($demoShop, 'No personal details, orders, or payments are collected in Demo mode.')
+    || !str_contains($demoShop, '<button class="button button-primary" type="submit" disabled>Checkout paused')
+    || !str_contains($demoShop, 'name="quantity[-1001]"')
+    || !str_contains($demoShop, 'Demo stock: 24')) {
+    throw new RuntimeException('Demo shop did not render the preview-only sports catalog or keep live checkout paused.');
 }
 
 $inlineCheckout = renderTemplate('shop-inline-checkout', [

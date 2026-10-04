@@ -35,6 +35,82 @@ final class ShopService
         )->fetchAll();
     }
 
+    /**
+     * Preview-only shop items for Demo mode. Negative IDs deliberately ensure
+     * these in-memory products can never be mistaken for persisted catalog rows.
+     *
+     * @return list<array{id:int,sku:string,name:string,description:string,price_kobo:int,stock_quantity:int}>
+     */
+    public static function demoProducts(): array
+    {
+        return [
+            [
+                'id' => -1001,
+                'sku' => 'DEMO-JER-01',
+                'name' => 'Navy and Lime Match Jersey',
+                'description' => 'Breathable Youth Unity Cup match-day shirt in the tournament colours.',
+                'price_kobo' => 1850000,
+                'stock_quantity' => 24,
+            ],
+            [
+                'id' => -1002,
+                'sku' => 'DEMO-BALL-01',
+                'name' => 'Size 5 Training Football',
+                'description' => 'Durable football for school, community-pitch and team training sessions.',
+                'price_kobo' => 2600000,
+                'stock_quantity' => 16,
+            ],
+            [
+                'id' => -1003,
+                'sku' => 'DEMO-SOCKS-01',
+                'name' => 'Navy Football Socks',
+                'description' => 'Comfortable match socks with a lime accent stripe.',
+                'price_kobo' => 550000,
+                'stock_quantity' => 30,
+            ],
+            [
+                'id' => -1004,
+                'sku' => 'DEMO-SHIN-01',
+                'name' => 'Junior Shin Guard Set',
+                'description' => 'Lightweight shin guards with soft ankle support for young players.',
+                'price_kobo' => 750000,
+                'stock_quantity' => 18,
+            ],
+            [
+                'id' => -1005,
+                'sku' => 'DEMO-CONES-01',
+                'name' => 'Training Cones Set',
+                'description' => 'Ten bright markers for warm-ups, dribbling drills and small-sided games.',
+                'price_kobo' => 850000,
+                'stock_quantity' => 12,
+            ],
+            [
+                'id' => -1006,
+                'sku' => 'DEMO-BIBS-01',
+                'name' => 'Reversible Training Bibs',
+                'description' => 'A five-piece set to split teams quickly during practice.',
+                'price_kobo' => 1400000,
+                'stock_quantity' => 10,
+            ],
+            [
+                'id' => -1007,
+                'sku' => 'DEMO-BOTTLE-01',
+                'name' => 'Team Sports Water Bottle',
+                'description' => 'Reusable 750 ml bottle with a secure sports cap.',
+                'price_kobo' => 450000,
+                'stock_quantity' => 25,
+            ],
+            [
+                'id' => -1008,
+                'sku' => 'DEMO-CAP-01',
+                'name' => 'Youth Unity Cup Supporter Cap',
+                'description' => 'A relaxed-fit cap for cheering on the teams from the touchline.',
+                'price_kobo' => 650000,
+                'stock_quantity' => 20,
+            ],
+        ];
+    }
+
     /** @return list<array<string,mixed>> */
     public function adminProducts(): array
     {
