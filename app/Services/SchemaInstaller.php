@@ -65,6 +65,11 @@ final class SchemaInstaller
             }
         }
 
+        $productImageColumn = $pdo->query("SHOW COLUMNS FROM shop_products LIKE 'image_file'")->fetch();
+        if (!is_array($productImageColumn)) {
+            $pdo->exec("ALTER TABLE shop_products ADD image_file VARCHAR(64) NOT NULL DEFAULT '' AFTER description");
+        }
+
         if ((int) $pdo->query('SELECT COUNT(*) FROM venues')->fetchColumn() === 0) {
             $venueSeed = $pdo->prepare(
                 "INSERT IGNORE INTO venues (name, zone, address, capacity, status, created_at, updated_at) "

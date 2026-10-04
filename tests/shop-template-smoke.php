@@ -14,6 +14,27 @@ function renderTemplate(string $template, array $data): string
     return (string) ob_get_clean();
 }
 
+$previousErrorHandler = set_error_handler(static function (int $severity, string $message): never {
+    throw new ErrorException($message, 0, $severity);
+});
+try {
+    $layoutWithoutDescription = static function (): string {
+        $title = 'Layout description fallback';
+        $bodyClass = 'admin-page';
+        $topNote = 'TEST';
+        $content = '';
+        ob_start();
+        require dirname(__DIR__) . '/views/layout.php';
+        return (string) ob_get_clean();
+    };
+    $layoutMarkup = $layoutWithoutDescription();
+} finally {
+    restore_error_handler();
+}
+if (!str_contains($layoutMarkup, 'Youth Unity Cup tournament information and administration portal.')) {
+    throw new RuntimeException('The shared layout does not safely default an omitted meta description.');
+}
+
 $shop = renderTemplate('shop', [
     'title' => 'Official shop · Youth Unity Cup',
     'topNote' => 'YOUTH UNITY CUP OFFICIAL SHOP',
@@ -67,6 +88,8 @@ $demoShop = renderTemplate('shop', [
     'oldForm' => [],
 ]);
 if (substr_count($demoShop, '<article class="shop-product-card">') !== 8
+    || substr_count($demoShop, 'class="shop-product-image"') !== 8
+    || !str_contains($demoShop, 'src="/assets/demo-products/jersey.svg"')
     || !str_contains($demoShop, 'Navy and Lime Match Jersey')
     || !str_contains($demoShop, 'Size 5 Training Football')
     || !str_contains($demoShop, 'Your live catalogue and stock remain untouched')
@@ -184,8 +207,41 @@ $adminProducts = renderTemplate('admin-manage', [
     'auditSearch' => '',
     'auditCategory' => '',
 ]);
-if (!str_contains($adminProducts, 'Add a product') || !str_contains($adminProducts, 'Unity Cup Shirt')) {
-    throw new RuntimeException('Admin product template did not render the catalog manager.');
+if (!str_contains($adminProducts, 'Add a product')
+    || !str_contains($adminProducts, 'Unity Cup Shirt')
+    || !str_contains($adminProducts, 'enctype="multipart/form-data"')
+    || !str_contains($adminProducts, 'name="product_image"')) {
+    throw new RuntimeException('Admin product template did not render the catalog manager and image upload field.');
+}
+
+$demoAdminProducts = renderTemplate('admin-manage', [
+    'title' => 'Shop products · Youth Unity Cup Admin',
+    'topNote' => 'ADMIN CONTROL ROOM',
+    'bodyClass' => 'admin-page',
+    'siteMode' => 'demo',
+    'admin' => ['id' => 1, 'email' => 'admin@example.test', 'username' => 'admin'],
+    'resource' => 'products',
+    'rows' => $demoProducts,
+    'formValues' => [],
+    'teams' => [],
+    'venues' => [],
+    'settings' => [],
+    'mail' => [],
+    'payHubConfigured' => true,
+    'appTimezone' => 'UTC',
+    'flash' => null,
+    'auditTotal' => 0,
+    'auditPage' => 1,
+    'auditPages' => 1,
+    'auditSearch' => '',
+    'auditCategory' => '',
+]);
+if (substr_count($demoAdminProducts, '<img class="admin-product-image"') !== 8
+    || !str_contains($demoAdminProducts, 'DEMO PREVIEW CATALOG')
+    || !str_contains($demoAdminProducts, 'Read-only in Demo')
+    || str_contains($demoAdminProducts, 'action="/admin/products/save"')
+    || str_contains($demoAdminProducts, 'action="/admin/products/delete"')) {
+    throw new RuntimeException('Demo admin product manager must display all sample products and images without write actions.');
 }
 
 $admin = renderTemplate('admin-manage', [
@@ -224,8 +280,11 @@ $admin = renderTemplate('admin-manage', [
     'auditPages' => 1,
     'auditSearch' => '',
     'auditCategory' => '',
+    'shopSchemaWarning' => 'The shop database schema needs a one-time additive update.',
 ]);
-if (!str_contains($admin, 'Shop orders') || !str_contains($admin, 'Confirm review')) {
+if (!str_contains($admin, 'Shop orders')
+    || !str_contains($admin, 'Confirm review')
+    || !str_contains($admin, 'The shop database schema needs a one-time additive update.')) {
     throw new RuntimeException('Admin shop order template did not render the review action.');
 }
 

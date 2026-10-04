@@ -16,7 +16,7 @@ The verification step is intentionally transparent: the installer labels the ver
 - PHP 8.1 or later
 - MySQL 8.0+ or MariaDB 10.5+
 - PHP extensions: `pdo`, `pdo_mysql`, `curl`, `openssl`, `mbstring`, `json`, `session`, `fileinfo`, and GD with WebP support
-- For hero uploads, set `upload_max_filesize` to at least `26M`, `post_max_size` above that (for example `28M`), and a memory limit suitable for GD image processing
+- For hero and product-image uploads, set `upload_max_filesize` to at least `26M`, `post_max_size` above that (for example `28M`), and a memory limit suitable for GD image processing
 - HTTPS for production
 - `config/` and `storage/` writable by the PHP process, preferably on a filesystem accessible only to the application account
 
@@ -38,7 +38,7 @@ Open `http://localhost:8080/`. The first request redirects to `/install`. Licens
 2. Enable HTTPS and the Apache rewrite module if deploying with the supplied `public/.htaccess`.
 3. Create an empty MySQL/MariaDB database and a least-privilege database account.
 4. Visit `/install`, complete each stage, and sign in at `/admin/login`.
-5. For an already-installed site, missing tables listed in `database/schema.mysql.sql` are created automatically on the next application request. The runtime database account must have permission to create tables for this repair to work. Back up the database and run `php /absolute/path/to/YOUTH-UNITY-CUP/bin/migrate-schema.php` for upgrades that add or change existing columns or indexes; that additive CLI updater does not drop existing live data.
+5. For an already-installed site, missing tables listed in `database/schema.mysql.sql` are created automatically on the next application request. The runtime database account must have permission to create tables for this repair to work. Back up the database and run `php /absolute/path/to/YOUTH-UNITY-CUP/bin/migrate-schema.php` after deploying upgrades that add or change existing columns or indexes—including the product-image field—before using those features. The additive CLI updater does not drop existing live data.
 6. Configure the PayHub public and secret keys and webhook endpoint as described in **PayHub shop setup** below before opening `/shop` for real orders.
 7. Confirm SMTP delivery from the dashboard's **Send a test notification** action. Without SMTP, mail remains in the database outbox and is not silently discarded.
 8. Schedule the outbox worker (for example once per minute), running as the same OS account that serves PHP, to retry temporary SMTP failures:
@@ -51,7 +51,7 @@ The worker processes up to 50 queued notifications per run. Each message is pers
 
 ## PayHub shop setup
 
-1. Create products, set NGN prices, and enter available stock under **Admin → Shop products**. Product names, SKU, unit price, and quantity are revalidated server-side; order lines retain price/name snapshots.
+1. Create products, set NGN prices, enter available stock, and optionally upload a product image under **Admin → Shop products**. Product images may be JPEG, PNG, or WebP up to 8 MB; the server re-encodes them as WebP in protected storage. Product names, SKU, unit price, and quantity are revalidated server-side; order lines retain price/name snapshots.
 2. In **Admin → Settings → PayHub shop payments**, enter both the PayHub **public** key and **secret** key from the merchant dashboard. The secret is saved only in protected `config/local.php` and never reaches a browser; the public key is delivered only to the inline-checkout page. Blank fields keep saved values; use the separate remove-key controls to clear either key. Both keys are required to open new inline checkouts.
 3. Register the HTTPS webhook endpoint `https://<your-domain>/payments/payhub/webhook` in the PayHub merchant dashboard. PayHub specifies `X-Payhub-Signature` as the HMAC-SHA256 hex digest of the exact raw JSON request body using the secret key. The endpoint caps payloads, verifies the raw-body signature before JSON parsing, maps only the signed reference to a local order, and then calls PayHub's verify API. The webhook body is a notification, not payment proof.
 4. The shop loads `https://merchant.payhub.com.ng/inline.js` and opens `PayhubPop.setup` with the server-created amount in kobo, customer email, and a cryptographically random order-bound reference. The browser callback is used only to return the customer to `/shop/return`; it is never trusted as evidence of payment. The server verifies the reference, successful status, exact expected amount in kobo, and `NGN` currency with PayHub's authoritative verification endpoint before marking an order paid. Keep the HTTPS webhook enabled for customers who close the browser before returning.
@@ -59,13 +59,17 @@ The worker processes up to 50 queued notifications per run. Each message is pers
 
 The integration uses PayHub's inline checkout and `https://merchant.payhub.com.ng/api/transaction/verify/:reference`; it does not use a browser redirect as proof of payment. No PayHub credentials or MySQL service are available in the development workspace, so live payment and real webhook delivery have not been exercised here. Configure and test with your merchant account before accepting real orders.
 
+The `/admin/orders` page catches shop-database query failures, logs the PDO SQLSTATE, and shows a one-time migration hint when tables or columns appear to be missing. If the page still fails after migration, inspect the configured PHP error log; the live database error must be diagnosed from that SQLSTATE and database state.
+
 ## Homepage hero management
 
 Use **Admin → Homepage hero** to choose the default sports artwork, upload an image, add a YouTube link, or upload a short MP4/WebM loop. The settings reuse the existing `system_settings` table; uploads are validated, stored under protected `storage/hero/` (outside the public document root), and served through a narrow allow-listed route with byte-range support for video playback. Images are decoded, stripped of metadata, resized when oversized, and re-encoded as WebP. Uploads are limited to 10 MB for images and 25 MB for videos. MP4 files must have fast-start metadata (`moov` atom before media data); use web-optimized, muted 1080p clips for quick mobile starts. Uploaded videos autoplay muted, loop, and play inline. YouTube links are restricted to supported YouTube hosts and use a privacy-enhanced looping embed with autoplay muted.
 
+Product images can be uploaded while the site is in Production under **Admin → Shop products**. JPEG, PNG, and WebP uploads are re-encoded, stripped of metadata, stored under protected `storage/shop-products/`, and served through a strict filename allow-list. On an existing installation, back up the configured database and run `php /absolute/path/to/YOUTH-UNITY-CUP/bin/migrate-schema.php` once before the first product-image upload.
+
 ## Demo and Production mode
 
-The Admin dashboard includes an explicit **Switch to Demo** / **Switch to Production** control. Switching to Demo takes a transactional database snapshot of the live `teams`, `team_players`, `venues`, and `fixtures` rows, then installs 16 sample teams across Groups A–D, 11 sample player profiles per team, eight sample community venues, and 24 round-robin group fixtures (including sample scores). The public shop displays a separate preview-only collection of football gear with illustrative prices and stock; these sample products are held in memory and do not change the live product catalog. Public pages are visibly labelled Demo; live registrations, PayHub checkout, and non-tournament admin writes are paused.
+The Admin dashboard includes an explicit **Switch to Demo** / **Switch to Production** control. Switching to Demo takes a transactional database snapshot of the live `teams`, `team_players`, `venues`, and `fixtures` rows, then installs 16 sample teams across Groups A–D, 11 sample player profiles per team, eight sample community venues, and 24 round-robin group fixtures (including sample scores). The public shop and admin product manager display the same preview-only collection of football gear with illustrative prices, stock, and local illustrations. These sample products are held in memory and are read-only; the live product catalog and stock are not changed. Public pages are visibly labelled Demo; live registrations, PayHub checkout, and non-tournament admin writes are paused.
 
 Switching back to Production restores the exact saved tournament rows and IDs from the snapshot in one transaction, then removes the snapshot only after the restore succeeds. Registration, transaction/payment, shop, admin-account, login, and security-history tables are never cleared by this switch. Keep a normal database backup before deploying column/index migrations or enabling the mode control. Missing tables are self-created from the canonical schema; use `bin/migrate-schema.php` for additive changes to existing columns or indexes.
 
@@ -80,12 +84,12 @@ Switching back to Production restores the exact saved tournament rows and IDs fr
 - Public `/registration` application form, administrator review workflow, and status emails
 - Admin settings for site title/contact, time zone, SMTP delivery, server-side PayHub secret/public keys, login-attempt thresholds, and IP-block duration; searchable, paginated `/admin/activity` audit history
 - CSRF-protected, four-stage installer
-- Version/extension/permission checks, including `fileinfo` and GD WebP support for secure hero-image uploads
+- Version/extension/permission checks, including `fileinfo` and GD WebP support for secure hero and shop-product image uploads
 - Canonical MySQL schema for admins, login history, IP throttling, audit events, notifications, transactions, PayHub provider references, password-reset tokens, settings, shop products/orders/order-item snapshots, teams/players, venues, fixtures, and public registrations; missing declared tables are auto-created without dropping existing tables
 - Argon/Bcrypt-compatible PHP password hashing (`PASSWORD_DEFAULT`)
 - Session ID rotation, secure/HTTP-only/SameSite cookies, configurable temporary IP throttling, and an admin page to review or release active blocks
 - Successful login and security-threshold email alerts; audit/history records for all sign-in outcomes; one-time email password resets
-- Admin workflows to manage product SKUs, NGN prices and available stock; review shop orders, flag payment mismatches, and progress verified orders through fulfillment
+- Admin workflows to manage product SKUs, NGN prices, protected product-image uploads and available stock; review shop orders, flag payment mismatches, and progress verified orders through fulfillment
 - Public `/shop` catalog and PayHub inline checkout; authoritative server-side status/reference/amount/currency verification, raw-body HMAC-signed webhook reconciliation, 20-minute inventory reservations, and order-status return page
 - Admin workflows to record non-gateway transaction events and queue notifications; public registration confirmation, review-status, and verified shop-payment notifications
 - SMTP over STARTTLS, implicit TLS, or an explicitly selected unencrypted transport; TLS peer checks are enabled
@@ -104,4 +108,4 @@ Switching back to Production restores the exact saved tournament rows and IDs fr
 
 ## Validation before release
 
-Run PHP's syntax checker on every PHP file, `php tests/schema-self-heal-smoke.php`, `php tests/payhub-security.php`, `php tests/hero-media-security.php`, `php tests/shop-template-smoke.php`, `php tests/admin-management-smoke.php`, and `php tests/public-tournament-smoke.php`; complete the installer against a disposable MySQL database, verify Demo → Production snapshot restoration on test data, test a successful SMTP message and the queued/retry path, and exercise PayHub inline checkout, a signed webhook, and server-side payment-return verification before production deployment. Test hero image/video uploads and browser playback on the production-like web server. Never test schema changes or mode switching against the live tournament database.
+Run PHP's syntax checker on every PHP file, `php tests/schema-self-heal-smoke.php`, `php tests/payhub-security.php`, `php tests/hero-media-security.php`, `php tests/product-images-smoke.php`, `php tests/shop-template-smoke.php`, `php tests/admin-management-smoke.php`, and `php tests/public-tournament-smoke.php`; complete the installer against a disposable MySQL database, verify Demo → Production snapshot restoration on test data, test a successful SMTP message and the queued/retry path, and exercise PayHub inline checkout, a signed webhook, and server-side payment-return verification before production deployment. Test hero and product-image uploads, image replacement/retention, and browser rendering on the production-like web server. Never test schema changes or mode switching against the live tournament database.

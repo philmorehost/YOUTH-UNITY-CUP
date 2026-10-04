@@ -6,6 +6,7 @@ use Yuc\Controllers\AdminController;
 use Yuc\Controllers\AdminOperationsController;
 use Yuc\Controllers\InstallerController;
 use Yuc\Controllers\PublicSiteController;
+use Yuc\Controllers\ProductImageController;
 use Yuc\Controllers\ShopController;
 use Yuc\Core\ConfigStore;
 use Yuc\Core\Database;
@@ -89,6 +90,9 @@ try {
         $router->get('/team', static function () use ($getPublicController): void {
             $getPublicController()->team();
         });
+        $productImageController = new ProductImageController();
+        $router->get('/shop/product-image', [$productImageController, 'show']);
+
         $shopController = null;
         $getShopController = static function () use (&$shopController, $config, $getPdo): ShopController {
             if (!$shopController instanceof ShopController) {
@@ -209,7 +213,15 @@ try {
         yuc_current_path()
     );
 } catch (Throwable $exception) {
-    error_log('Youth Unity Cup request failed (' . get_class($exception) . ').');
+    $requestPath = function_exists('yuc_current_path') ? yuc_current_path() : 'unknown route';
+    if ($exception instanceof PDOException) {
+        $sqlState = is_array($exception->errorInfo ?? null) && is_scalar($exception->errorInfo[0] ?? null)
+            ? (string) $exception->errorInfo[0]
+            : (string) $exception->getCode();
+        error_log('Youth Unity Cup request failed on ' . $requestPath . ' (PDOException, SQLSTATE ' . $sqlState . '): ' . $exception->getMessage());
+    } else {
+        error_log('Youth Unity Cup request failed on ' . $requestPath . ' (' . get_class($exception) . ').');
+    }
     if (!headers_sent()) {
         http_response_code(500);
     }

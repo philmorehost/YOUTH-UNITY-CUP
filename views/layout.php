@@ -5,6 +5,9 @@
 /** @var string $description */
 /** @var string $content */
 $siteMode = ($siteMode ?? 'production') === 'demo' ? 'demo' : 'production';
+$description = isset($description) && is_string($description) && trim($description) !== ''
+    ? trim($description)
+    : 'Youth Unity Cup tournament information and administration portal.';
 $inlinePayHubScript = !empty($inlinePayHubScript);
 $siteYear = yuc_current_year((string) ($appTimezone ?? 'Africa/Lagos'));
 ?>

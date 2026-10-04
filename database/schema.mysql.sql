@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS shop_products (
     sku VARCHAR(60) NOT NULL,
     name VARCHAR(140) NOT NULL,
     description VARCHAR(1000) NOT NULL DEFAULT '',
+    image_file VARCHAR(64) NOT NULL DEFAULT '',
     price_kobo BIGINT UNSIGNED NOT NULL,
     stock_quantity INT UNSIGNED NOT NULL DEFAULT 0,
     status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',

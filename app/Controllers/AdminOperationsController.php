@@ -77,6 +77,8 @@ final class AdminOperationsController
 
         $rows = [];
         $formValues = [];
+        $orderProducts = [];
+        $shopSchemaWarning = '';
         $editId = filter_var($_GET['edit'] ?? 0, FILTER_VALIDATE_INT) ?: 0;
         $editIpInput = $_GET['edit_ip'] ?? '';
         $editIp = is_string($editIpInput) ? trim($editIpInput) : '';
@@ -95,13 +97,19 @@ final class AdminOperationsController
         } elseif ($resource === 'transactions') {
             $rows = $this->tournament->transactions($showArchived);
         } elseif ($resource === 'products') {
-            $rows = $this->shop->adminProducts();
+            $rows = $isDemoMode ? ShopService::demoProducts() : $this->shop->adminProducts();
         } elseif ($resource === 'orders') {
-            $rows = $this->shop->orders($showArchived, !$isDemoMode);
+            try {
+                $rows = $this->shop->orders($showArchived, !$isDemoMode);
+                $orderProducts = $this->shop->publicProducts(!$isDemoMode);
+            } catch (PDOException $exception) {
+                $shopSchemaWarning = $this->shopOrdersDatabaseWarning($exception);
+                $rows = [];
+                $orderProducts = [];
+            }
         } elseif ($resource === 'security') {
             $rows = $this->tournament->blockedIps();
         }
-        $orderProducts = $resource === 'orders' ? $this->shop->publicProducts(!$isDemoMode) : [];
         $audit = ['entries' => [], 'total' => 0, 'page' => 1, 'pages' => 1];
         $auditSearch = '';
         $auditCategory = '';
@@ -128,14 +136,21 @@ final class AdminOperationsController
             }
         } elseif ($editId > 0 && $resource === 'players') {
             $formValues = $this->tournament->findPlayer($editId) ?? [];
-        } elseif ($editId > 0 && $resource === 'products') {
+        } elseif ($editId > 0 && $resource === 'products' && !$isDemoMode) {
             $formValues = $this->shop->findProduct($editId) ?? [];
         } elseif ($editId > 0 && $resource === 'registrations') {
             $formValues = $this->tournament->findRegistration($editId) ?? [];
         } elseif ($editId > 0 && $resource === 'transactions') {
             $formValues = $this->tournament->findTransactionForAdmin($editId) ?? [];
-        } elseif ($editId > 0 && $resource === 'orders') {
-            $formValues = $this->shop->findOrderForAdmin($editId) ?? [];
+        } elseif ($editId > 0 && $resource === 'orders' && $shopSchemaWarning === '') {
+            try {
+                $formValues = $this->shop->findOrderForAdmin($editId) ?? [];
+            } catch (PDOException $exception) {
+                $shopSchemaWarning = $this->shopOrdersDatabaseWarning($exception);
+                $rows = [];
+                $orderProducts = [];
+                $formValues = [];
+            }
         } elseif ($resource === 'security' && $editIp !== '') {
             $formValues = $this->tournament->findBlockedIp($editIp) ?? [];
         }
@@ -160,6 +175,7 @@ final class AdminOperationsController
             'rows' => $rows,
             'formValues' => $formValues,
             'orderProducts' => $orderProducts,
+            'shopSchemaWarning' => $shopSchemaWarning,
             'teams' => $resource === 'fixtures' ? $this->tournament->teams(true) : ($resource === 'players' ? $this->tournament->teams() : []),
             'venues' => $resource === 'fixtures' ? $this->tournament->venues(true) : [],
             'siteMode' => $isDemoMode ? 'demo' : 'production',
@@ -207,7 +223,7 @@ final class AdminOperationsController
                 $reference = $this->tournament->saveTransaction($values, (int) $admin['id']);
                 yuc_flash('success', $wasEdit ? 'Transaction ' . $reference . ' was updated.' : 'Transaction ' . $reference . ' was recorded. Notification delivery status is shown on the dashboard.');
             } elseif ($resource === 'products') {
-                $this->shop->saveProduct($values, (int) $admin['id']);
+                $this->shop->saveProduct($values, (int) $admin['id'], $_FILES);
                 yuc_flash('success', 'Shop product details saved.');
             } elseif ($resource === 'orders') {
                 $this->shop->updateOrderDetails($values, (int) $admin['id']);
@@ -222,9 +238,17 @@ final class AdminOperationsController
             $_SESSION['_old_form'] = ['resource' => $resource, 'values' => $values];
             yuc_flash('error', $exception->getMessage());
         } catch (PDOException $exception) {
-            error_log('Youth Unity Cup admin data save failed (' . (string) $exception->getCode() . ').');
+            $sqlState = is_array($exception->errorInfo ?? null) && is_scalar($exception->errorInfo[0] ?? null)
+                ? (string) $exception->errorInfo[0]
+                : (string) $exception->getCode();
+            error_log('Youth Unity Cup admin data save failed (SQLSTATE ' . $sqlState . ').');
             $_SESSION['_old_form'] = ['resource' => $resource, 'values' => $values];
-            yuc_flash('error', 'The record could not be saved. Check for duplicate team, venue, SKU, or reference values and verify the database connection.');
+            $missingProductImageColumn = $resource === 'products'
+                && in_array($sqlState, ['42S02', '42S22'], true)
+                && str_contains(strtolower($exception->getMessage()), 'image_file');
+            yuc_flash('error', $missingProductImageColumn
+                ? 'Product-image storage needs a one-time database update. Back up the database, run bin/migrate-schema.php, then upload the image again.'
+                : 'The record could not be saved. Check for duplicate team, venue, SKU, or reference values and verify the database connection.');
         } catch (Throwable $exception) {
             error_log('Youth Unity Cup admin data save failed (' . get_class($exception) . ').');
             yuc_flash('error', 'The record could not be saved. Please try again.');
@@ -591,6 +615,18 @@ final class AdminOperationsController
             yuc_flash('error', 'Settings could not be saved. Check database and protected configuration-folder permissions.');
         }
         yuc_redirect('/admin/settings');
+    }
+
+    private function shopOrdersDatabaseWarning(PDOException $exception): string
+    {
+        $sqlState = is_array($exception->errorInfo ?? null) && is_scalar($exception->errorInfo[0] ?? null)
+            ? (string) $exception->errorInfo[0]
+            : (string) $exception->getCode();
+        error_log('Youth Unity Cup admin orders query failed (SQLSTATE ' . $sqlState . '): ' . $exception->getMessage());
+
+        return in_array($sqlState, ['42S02', '42S22'], true)
+            ? 'The shop database schema needs a one-time additive update. Back up the database, run bin/migrate-schema.php with the configured account, then reload this page.'
+            : 'Shop order data could not be loaded (SQLSTATE ' . $sqlState . '). Check the database connection and server logs. No order data was changed.';
     }
 
     private function setSimpleStatus(string $table, int $id, string $status, array $allowed, int $adminId): void

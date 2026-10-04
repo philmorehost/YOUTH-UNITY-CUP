@@ -16,11 +16,13 @@ final class ShopService
     private const RESERVATION_MINUTES = 20;
 
     private NotificationService $notifications;
+    private ProductImageService $productImages;
 
     /** @param array<string,mixed> $config */
     public function __construct(private PDO $pdo, array $config)
     {
         $this->notifications = new NotificationService($pdo, $config);
+        $this->productImages = new ProductImageService();
     }
 
     /** @return list<array<string,mixed>> */
@@ -29,21 +31,21 @@ final class ShopService
         if ($releaseExpiredReservations) {
             $this->releaseExpiredReservations();
         }
-        return $this->pdo->query(
-            "SELECT id, sku, name, description, price_kobo, stock_quantity "
-            . "FROM shop_products WHERE status='active' AND stock_quantity > 0 ORDER BY name, id LIMIT 120"
+        $products = $this->pdo->query(
+            "SELECT * FROM shop_products WHERE status='active' AND stock_quantity > 0 ORDER BY name, id LIMIT 120"
         )->fetchAll();
+        return $this->appendImageUrls($products);
     }
 
     /**
      * Preview-only shop items for Demo mode. Negative IDs deliberately ensure
      * these in-memory products can never be mistaken for persisted catalog rows.
      *
-     * @return list<array{id:int,sku:string,name:string,description:string,price_kobo:int,stock_quantity:int}>
+     * @return list<array{id:int,sku:string,name:string,description:string,price_kobo:int,stock_quantity:int,image_url:string,image_file:string,status:string,order_item_count:int}>
      */
     public static function demoProducts(): array
     {
-        return [
+        $products = [
             [
                 'id' => -1001,
                 'sku' => 'DEMO-JER-01',
@@ -109,16 +111,28 @@ final class ShopService
                 'stock_quantity' => 20,
             ],
         ];
+        $images = [
+            'jersey.svg', 'football.svg', 'socks.svg', 'shin-guards.svg',
+            'training-cones.svg', 'training-bibs.svg', 'water-bottle.svg', 'cap.svg',
+        ];
+        foreach ($products as $index => &$product) {
+            $product['image_url'] = '/assets/demo-products/' . $images[$index];
+            $product['image_file'] = '';
+            $product['status'] = 'active';
+            $product['order_item_count'] = 0;
+        }
+        unset($product);
+        return $products;
     }
 
     /** @return list<array<string,mixed>> */
     public function adminProducts(): array
     {
-        return $this->pdo->query(
-            'SELECT p.id, p.sku, p.name, p.description, p.price_kobo, p.stock_quantity, p.status, p.created_at, p.updated_at, '
-            . '(SELECT COUNT(*) FROM shop_order_items i WHERE i.product_id=p.id) AS order_item_count '
+        $products = $this->pdo->query(
+            'SELECT p.*, (SELECT COUNT(*) FROM shop_order_items i WHERE i.product_id=p.id) AS order_item_count '
             . 'FROM shop_products p ORDER BY p.updated_at DESC, p.id DESC LIMIT 500'
         )->fetchAll();
+        return $this->appendImageUrls($products);
     }
 
     /** @return array<string,mixed>|null */
@@ -131,11 +145,12 @@ final class ShopService
             return null;
         }
         $row['price_amount'] = self::formatKobo((int) $row['price_kobo']);
+        $row['image_url'] = $this->productImages->publicUrl((string) ($row['image_file'] ?? ''));
         return $row;
     }
 
-    /** @param array<string,mixed> $input */
-    public function saveProduct(array $input, int $adminId): void
+    /** @param array<string,mixed> $input @param array<string,mixed> $files */
+    public function saveProduct(array $input, int $adminId, array $files = []): void
     {
         $id = filter_var(is_scalar($input['id'] ?? null) ? $input['id'] : 0, FILTER_VALIDATE_INT);
         if ($id === false || $id < 0) {
@@ -166,42 +181,83 @@ final class ShopService
             throw new InvalidArgumentException('Choose a valid product status.');
         }
 
-        if ($id > 0) {
-            $statement = $this->pdo->prepare(
-                'UPDATE shop_products SET sku=:sku, name=:name, description=:description, price_kobo=:price, '
-                . 'stock_quantity=:stock, status=:status, updated_at=UTC_TIMESTAMP() WHERE id=:id'
-            );
-            $statement->execute([
-                'sku' => $sku, 'name' => $name, 'description' => $description, 'price' => $priceKobo,
-                'stock' => $stock, 'status' => $status, 'id' => $id,
-            ]);
-            if ($statement->rowCount() === 0) {
-                $exists = $this->pdo->prepare('SELECT id FROM shop_products WHERE id=:id');
-                $exists->execute(['id' => $id]);
-                if ($exists->fetchColumn() === false) {
+        $newImage = $this->productImages->storeUpload($files['product_image'] ?? null);
+        $previousImage = '';
+        try {
+            $this->pdo->beginTransaction();
+            if ($id > 0) {
+                $existing = $this->pdo->prepare('SELECT * FROM shop_products WHERE id=:id LIMIT 1 FOR UPDATE');
+                $existing->execute(['id' => $id]);
+                $current = $existing->fetch();
+                if (!is_array($current)) {
                     throw new InvalidArgumentException('That product no longer exists.');
                 }
+                $previousImage = (string) ($current['image_file'] ?? '');
+
+                if ($newImage !== null) {
+                    $statement = $this->pdo->prepare(
+                        'UPDATE shop_products SET sku=:sku, name=:name, description=:description, price_kobo=:price, '
+                        . 'stock_quantity=:stock, status=:status, image_file=:image_file, updated_at=UTC_TIMESTAMP() WHERE id=:id'
+                    );
+                } else {
+                    $statement = $this->pdo->prepare(
+                        'UPDATE shop_products SET sku=:sku, name=:name, description=:description, price_kobo=:price, '
+                        . 'stock_quantity=:stock, status=:status, updated_at=UTC_TIMESTAMP() WHERE id=:id'
+                    );
+                }
+                $parameters = [
+                    'sku' => $sku, 'name' => $name, 'description' => $description, 'price' => $priceKobo,
+                    'stock' => $stock, 'status' => $status, 'id' => $id,
+                ];
+                if ($newImage !== null) {
+                    $parameters['image_file'] = $newImage;
+                }
+                $statement->execute($parameters);
+                $this->audit($adminId, 'transaction.shop_product_updated', 'Updated shop product ' . $sku);
+            } else {
+                if ($newImage !== null) {
+                    $statement = $this->pdo->prepare(
+                        'INSERT INTO shop_products (sku, name, description, price_kobo, stock_quantity, status, image_file, created_at, updated_at) '
+                        . 'VALUES (:sku, :name, :description, :price, :stock, :status, :image_file, UTC_TIMESTAMP(), UTC_TIMESTAMP())'
+                    );
+                } else {
+                    $statement = $this->pdo->prepare(
+                        'INSERT INTO shop_products (sku, name, description, price_kobo, stock_quantity, status, created_at, updated_at) '
+                        . 'VALUES (:sku, :name, :description, :price, :stock, :status, UTC_TIMESTAMP(), UTC_TIMESTAMP())'
+                    );
+                }
+                $parameters = [
+                    'sku' => $sku, 'name' => $name, 'description' => $description, 'price' => $priceKobo,
+                    'stock' => $stock, 'status' => $status,
+                ];
+                if ($newImage !== null) {
+                    $parameters['image_file'] = $newImage;
+                }
+                $statement->execute($parameters);
+                $this->audit($adminId, 'transaction.shop_product_created', 'Created shop product ' . $sku);
             }
-            $this->audit($adminId, 'transaction.shop_product_updated', 'Updated shop product ' . $sku);
-            return;
+            $this->pdo->commit();
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            if ($newImage !== null) {
+                $this->productImages->delete($newImage);
+            }
+            throw $exception;
         }
 
-        $statement = $this->pdo->prepare(
-            'INSERT INTO shop_products (sku, name, description, price_kobo, stock_quantity, status, created_at, updated_at) '
-            . 'VALUES (:sku, :name, :description, :price, :stock, :status, UTC_TIMESTAMP(), UTC_TIMESTAMP())'
-        );
-        $statement->execute([
-            'sku' => $sku, 'name' => $name, 'description' => $description, 'price' => $priceKobo,
-            'stock' => $stock, 'status' => $status,
-        ]);
-        $this->audit($adminId, 'transaction.shop_product_created', 'Created shop product ' . $sku);
+        if ($newImage !== null && $previousImage !== '' && $previousImage !== $newImage) {
+            $this->productImages->delete($previousImage);
+        }
     }
 
     public function deleteProduct(int $id, int $adminId): bool
     {
         $this->pdo->beginTransaction();
+        $removedImage = '';
         try {
-            $query = $this->pdo->prepare('SELECT sku, name FROM shop_products WHERE id=:id LIMIT 1 FOR UPDATE');
+            $query = $this->pdo->prepare('SELECT * FROM shop_products WHERE id=:id LIMIT 1 FOR UPDATE');
             $query->execute(['id' => $id]);
             $product = $query->fetch();
             if (!is_array($product)) {
@@ -217,8 +273,12 @@ final class ShopService
             } else {
                 $this->pdo->prepare('DELETE FROM shop_products WHERE id=:id')->execute(['id' => $id]);
                 $this->audit($adminId, 'transaction.shop_product_deleted', 'Deleted shop product ' . (string) $product['sku']);
+                $removedImage = (string) ($product['image_file'] ?? '');
             }
             $this->pdo->commit();
+            if ($removedImage !== '') {
+                $this->productImages->delete($removedImage);
+            }
             return !$hasOrderHistory;
         } catch (Throwable $exception) {
             if ($this->pdo->inTransaction()) {
@@ -1082,6 +1142,16 @@ final class ShopService
             }
         }
         $this->pdo->prepare('UPDATE shop_orders SET stock_reserved=1 WHERE id=:id')->execute(['id' => $orderId]);
+    }
+
+    /** @param list<array<string,mixed>> $products @return list<array<string,mixed>> */
+    private function appendImageUrls(array $products): array
+    {
+        foreach ($products as &$product) {
+            $product['image_url'] = $this->productImages->publicUrl((string) ($product['image_file'] ?? ''));
+        }
+        unset($product);
+        return $products;
     }
 
     /** @param array<string,mixed> $context */

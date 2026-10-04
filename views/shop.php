@@ -45,7 +45,7 @@ $checkoutReady = !empty($payHubConfigured) && !$demoMode;
                 <div class="shop-product-grid">
                     <?php foreach ($products as $product): $id = (int) $product['id']; $stock = (int) $product['stock_quantity']; ?>
                         <article class="shop-product-card">
-                            <div class="shop-product-mark" aria-hidden="true">Y</div>
+                            <?php if (!empty($product['image_url'])): ?><img class="shop-product-image" src="<?= yuc_e($product['image_url']) ?>" alt="<?= yuc_e($product['name']) ?>" loading="lazy" decoding="async"><?php else: ?><div class="shop-product-mark" aria-hidden="true">Y</div><?php endif; ?>
                             <div class="shop-product-copy"><span class="shop-product-sku">SKU · <?= yuc_e($product['sku']) ?></span><h3><?= yuc_e($product['name']) ?></h3><p><?= yuc_e($product['description'] !== '' ? $product['description'] : 'Official Youth Unity Cup merchandise.') ?></p></div>
                             <div class="shop-product-bottom"><strong class="shop-product-price">₦<?= number_format((int) $product['price_kobo'] / 100, 2) ?></strong><label for="shop-quantity-<?= $id ?>">Quantity</label><input id="shop-quantity-<?= $id ?>" name="quantity[<?= $id ?>]" type="number" min="0" max="<?= min(20, $stock) ?>" step="1" value="<?= yuc_e($oldQuantities[$id] ?? '0') ?>" aria-describedby="shop-stock-<?= $id ?>" <?= $demoMode ? 'disabled' : '' ?>><small id="shop-stock-<?= $id ?>"><?= $demoMode ? 'Demo stock: ' . $stock : 'Up to ' . min(20, $stock) . ' available' ?></small></div>
                         </article>

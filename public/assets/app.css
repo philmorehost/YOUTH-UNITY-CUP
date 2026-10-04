@@ -572,7 +572,13 @@ body{background:radial-gradient(ellipse at 5% 4%,rgba(96,165,224,.11),transparen
 .shop-product-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0 25px}
 .shop-product-card{display:flex;min-width:0;flex-direction:column;overflow:hidden;padding:17px;border:1px solid #e2eaf1;border-radius:18px;background:linear-gradient(155deg,#fff,#f8fafc);box-shadow:0 8px 20px rgba(24,48,77,.045)}
 .shop-product-mark{display:grid;place-items:center;width:42px;height:42px;margin-bottom:13px;border:1px solid #dae7f2;border-radius:14px;background:linear-gradient(140deg,#eff6fc,#fff);color:#184269;font:800 19px 'Barlow Condensed',sans-serif}
+.shop-product-image{display:block;width:100%;aspect-ratio:1.65;object-fit:cover;margin-bottom:13px;border:1px solid #e1eaf1;border-radius:14px;background:#eef3f6}
 .shop-product-copy{flex:1}.shop-product-sku{color:#8191a1;font-size:8px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.admin-product-cell{display:flex;align-items:center;gap:10px;min-width:190px}
+.admin-product-image,.admin-product-image-placeholder{display:grid;place-items:center;width:58px;height:48px;flex:0 0 58px;overflow:hidden;border:1px solid #e1eaf1;border-radius:10px;background:#eef3f6;object-fit:cover}
+.admin-product-image-placeholder{color:#184269;font:800 20px 'Barlow Condensed',sans-serif}
+.product-image-preview{display:flex;align-items:center;gap:12px;padding:10px;border:1px solid #e2eaf1;border-radius:12px;background:#f8fafc;color:#708195;font-size:12px}
+.product-image-preview img{width:86px;height:70px;object-fit:cover;border-radius:9px}
 .shop-product-copy h3{margin:5px 0 6px;color:#16324f;font:700 23px/1.1 'Barlow Condensed',sans-serif}
 .shop-product-copy p{min-height:32px;margin:0 0 14px;color:#738294;font-size:10px;line-height:1.55}
 .shop-product-bottom{display:grid;grid-template-columns:1fr 62px;align-items:center;gap:5px 10px;padding-top:12px;border-top:1px solid #edf1f5}
@@ -612,7 +618,7 @@ body{background:radial-gradient(ellipse at 5% 4%,rgba(96,165,224,.11),transparen
 .outcome-paid_needs_review{border-color:#f0d49d;background:#fff8e8;color:#8b621c}
 .outcome-payment_failed,.outcome-cancelled{border-color:#efd0d0;background:#fff4f4;color:#a34f4f}
 @media(max-width:900px){.shop-product-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.shop-customer-fields{grid-template-columns:1fr}.shop-orders-table{min-width:1080px}}
-@media(max-width:600px){.shop-panel,.shop-status-panel{padding:16px 12px}.shop-product-grid{grid-template-columns:1fr;gap:10px}.shop-product-card{display:grid;grid-template-columns:42px minmax(0,1fr);gap:0 12px;padding:13px}.shop-product-mark{grid-row:1/3;margin:0}.shop-product-copy p{min-height:0}.shop-product-bottom{grid-column:1/-1;margin-top:8px}.shop-customer-fields{padding:14px 11px}.shop-customer-fields .form-grid{grid-template-columns:1fr}.shop-checkout-actions{align-items:stretch;flex-direction:column}.shop-checkout-actions .button{width:100%}.shop-return-note{align-items:flex-start;flex-direction:column}.shop-order-heading{align-items:flex-start;flex-direction:column}.shop-status-actions{flex-direction:column}.shop-status-actions .button{width:100%}}
+@media(max-width:600px){.shop-panel,.shop-status-panel{padding:16px 12px}.shop-product-grid{grid-template-columns:1fr;gap:10px}.shop-product-card{display:grid;grid-template-columns:42px minmax(0,1fr);gap:0 12px;padding:13px}.shop-product-mark{grid-row:1/3;margin:0}.shop-product-card .shop-product-image{grid-row:1/3;width:42px;height:42px;aspect-ratio:1;margin:0;border-radius:14px}.shop-product-copy p{min-height:0}.shop-product-bottom{grid-column:1/-1;margin-top:8px}.shop-customer-fields{padding:14px 11px}.shop-customer-fields .form-grid{grid-template-columns:1fr}.shop-checkout-actions{align-items:stretch;flex-direction:column}.shop-checkout-actions .button{width:100%}.shop-return-note{align-items:flex-start;flex-direction:column}.shop-order-heading{align-items:flex-start;flex-direction:column}.shop-status-actions{flex-direction:column}.shop-status-actions .button{width:100%}}
 .shop-review-reason{color:#986423!important;font-weight:700}
 
 /* Readability pass: raise small utility text without changing the visual hierarchy. */
