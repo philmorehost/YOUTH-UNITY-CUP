@@ -11,6 +11,7 @@ use PDOException;
 use Throwable;
 use Yuc\Core\ConfigStore;
 use Yuc\Core\View;
+use Yuc\Services\PayHubClient;
 use Yuc\Services\ShopService;
 use Yuc\Services\TournamentService;
 
@@ -18,12 +19,14 @@ final class AdminOperationsController
 {
     private TournamentService $tournament;
     private ShopService $shop;
+    private PayHubClient $payHub;
 
     /** @param array<string,mixed> $config */
     public function __construct(private PDO $pdo, private array $config)
     {
         $this->tournament = new TournamentService($pdo, $config);
         $this->shop = new ShopService($pdo, $config);
+        $this->payHub = new PayHubClient($config);
     }
 
     public function manage(string $resource): void
@@ -39,6 +42,10 @@ final class AdminOperationsController
         $rows = [];
         $formValues = [];
         $editId = filter_var($_GET['edit'] ?? 0, FILTER_VALIDATE_INT) ?: 0;
+        $editIpInput = $_GET['edit_ip'] ?? '';
+        $editIp = is_string($editIpInput) ? trim($editIpInput) : '';
+        $archivedInput = $_GET['show_archived'] ?? '';
+        $showArchived = is_scalar($archivedInput) && (string) $archivedInput === '1';
         if ($resource === 'teams') {
             $rows = $this->tournament->teams();
         } elseif ($resource === 'venues') {
@@ -48,14 +55,15 @@ final class AdminOperationsController
         } elseif ($resource === 'registrations') {
             $rows = $this->tournament->registrations();
         } elseif ($resource === 'transactions') {
-            $rows = $this->tournament->transactions();
+            $rows = $this->tournament->transactions($showArchived);
         } elseif ($resource === 'products') {
             $rows = $this->shop->adminProducts();
         } elseif ($resource === 'orders') {
-            $rows = $this->shop->orders();
+            $rows = $this->shop->orders($showArchived);
         } elseif ($resource === 'security') {
             $rows = $this->tournament->blockedIps();
         }
+        $orderProducts = $resource === 'orders' ? $this->shop->publicProducts() : [];
         $audit = ['entries' => [], 'total' => 0, 'page' => 1, 'pages' => 1];
         $auditSearch = '';
         $auditCategory = '';
@@ -82,6 +90,14 @@ final class AdminOperationsController
             }
         } elseif ($editId > 0 && $resource === 'products') {
             $formValues = $this->shop->findProduct($editId) ?? [];
+        } elseif ($editId > 0 && $resource === 'registrations') {
+            $formValues = $this->tournament->findRegistration($editId) ?? [];
+        } elseif ($editId > 0 && $resource === 'transactions') {
+            $formValues = $this->tournament->findTransactionForAdmin($editId) ?? [];
+        } elseif ($editId > 0 && $resource === 'orders') {
+            $formValues = $this->shop->findOrderForAdmin($editId) ?? [];
+        } elseif ($resource === 'security' && $editIp !== '') {
+            $formValues = $this->tournament->findBlockedIp($editIp) ?? [];
         }
 
         $old = $_SESSION['_old_form'] ?? [];
@@ -89,6 +105,9 @@ final class AdminOperationsController
             $formValues = $old['values'];
         }
         unset($_SESSION['_old_form']);
+        if (in_array($resource, ['transactions', 'orders'], true) && !empty($formValues['archived_at'])) {
+            $formValues = [];
+        }
 
         $settings = $resource === 'settings' ? $this->tournament->settings() : [];
         View::render('admin-manage', [
@@ -99,6 +118,7 @@ final class AdminOperationsController
             'resource' => $resource,
             'rows' => $rows,
             'formValues' => $formValues,
+            'orderProducts' => $orderProducts,
             'teams' => $resource === 'fixtures' ? $this->tournament->teams(true) : [],
             'venues' => $resource === 'fixtures' ? $this->tournament->venues(true) : [],
             'settings' => $settings,
@@ -110,6 +130,7 @@ final class AdminOperationsController
             'auditPages' => $audit['pages'],
             'auditSearch' => $auditSearch,
             'auditCategory' => $auditCategory,
+            'showArchived' => $showArchived,
             'flash' => yuc_take_flash(),
         ]);
     }
@@ -129,12 +150,22 @@ final class AdminOperationsController
             } elseif ($resource === 'fixtures') {
                 $this->tournament->saveFixture($values, (int) $admin['id'], (string) ($this->config['app']['timezone'] ?? 'UTC'));
                 yuc_flash('success', 'Fixture details saved.');
+            } elseif ($resource === 'registrations') {
+                $reference = $this->tournament->saveRegistration($values, (int) $admin['id']);
+                yuc_flash('success', 'Registration ' . $reference . ' was saved.');
             } elseif ($resource === 'transactions') {
-                $reference = $this->tournament->createTransaction($values, (int) $admin['id']);
-                yuc_flash('success', 'Transaction ' . $reference . ' was recorded. Notification delivery status is shown on the dashboard.');
+                $wasEdit = (int) ($values['id'] ?? 0) > 0;
+                $reference = $this->tournament->saveTransaction($values, (int) $admin['id']);
+                yuc_flash('success', $wasEdit ? 'Transaction ' . $reference . ' was updated.' : 'Transaction ' . $reference . ' was recorded. Notification delivery status is shown on the dashboard.');
             } elseif ($resource === 'products') {
                 $this->shop->saveProduct($values, (int) $admin['id']);
                 yuc_flash('success', 'Shop product details saved.');
+            } elseif ($resource === 'orders') {
+                $this->shop->updateOrderDetails($values, (int) $admin['id']);
+                yuc_flash('success', 'Shop order customer and fulfillment details saved. Payment data was not changed.');
+            } elseif ($resource === 'security') {
+                $this->tournament->saveBlockedIp($values, (int) $admin['id']);
+                yuc_flash('success', 'The IP block was saved.');
             } else {
                 yuc_flash('error', 'That form cannot be saved.');
             }
@@ -150,6 +181,158 @@ final class AdminOperationsController
             yuc_flash('error', 'The record could not be saved. Please try again.');
         }
         yuc_redirect('/admin/' . $resource);
+    }
+
+    public function createOrder(): void
+    {
+        $admin = $this->requireAdmin();
+        $redirect = '/admin/orders';
+        $this->verifyCsrf($redirect);
+        $values = $_POST;
+        if (!$this->payHub->isConfigured()) {
+            yuc_flash('error', 'Configure PayHub before creating an order so its stock reservation and payment can be tracked safely.');
+            yuc_redirect($redirect);
+        }
+
+        $orderReference = '';
+        try {
+            $order = $this->shop->createOrder($values, yuc_client_ip(), (int) $admin['id']);
+            $orderReference = (string) $order['reference'];
+            $checkout = $this->payHub->initialize([
+                'email' => $order['email'],
+                'amount_kobo' => $order['total_kobo'],
+                'name' => $order['name'],
+                'phone' => $order['phone'],
+            ]);
+            $this->shop->attachPayment($orderReference, $checkout['reference'], $checkout['authorization_url']);
+            yuc_flash('success', 'Order ' . $orderReference . ' was created. Open its PayHub checkout link from the order list; payment remains unconfirmed until PayHub verifies it.');
+        } catch (InvalidArgumentException $exception) {
+            $this->closeIncompleteOrder($orderReference);
+            $_SESSION['_old_form'] = ['resource' => 'orders', 'values' => $this->safeOrderFormValues($values)];
+            yuc_flash('error', $exception->getMessage());
+        } catch (Throwable $exception) {
+            $this->closeIncompleteOrder($orderReference);
+            error_log('Youth Unity Cup admin shop-order creation failed (' . get_class($exception) . ').');
+            $_SESSION['_old_form'] = ['resource' => 'orders', 'values' => $this->safeOrderFormValues($values)];
+            yuc_flash('error', 'The order could not be created or its PayHub checkout could not be initialized. Any stock reservation has been released. Please try again.');
+        }
+        yuc_redirect($redirect);
+    }
+
+    /** @param array<string,mixed> $input @return array<string,mixed> */
+    private function safeOrderFormValues(array $input): array
+    {
+        $value = static function (mixed $candidate, int $limit): string {
+            return is_scalar($candidate) ? mb_substr(trim((string) $candidate), 0, $limit) : '';
+        };
+        $quantities = [];
+        if (is_array($input['quantity'] ?? null)) {
+            foreach (array_slice($input['quantity'], 0, 120, true) as $id => $quantity) {
+                if (is_scalar($id) && is_scalar($quantity) && filter_var((string) $id, FILTER_VALIDATE_INT) !== false) {
+                    $quantities[(string) $id] = mb_substr((string) $quantity, 0, 3);
+                }
+            }
+        }
+        return [
+            'create_order' => '1',
+            'customer_name' => $value($input['customer_name'] ?? '', 140),
+            'customer_email' => $value($input['customer_email'] ?? '', 190),
+            'customer_phone' => $value($input['customer_phone'] ?? '', 40),
+            'fulfillment_notes' => $value($input['fulfillment_notes'] ?? '', 500),
+            'quantity' => $quantities,
+        ];
+    }
+
+    private function closeIncompleteOrder(string $reference): void
+    {
+        if ($reference === '') {
+            return;
+        }
+        try {
+            $this->shop->failPaymentInitialization($reference);
+        } catch (Throwable $exception) {
+            error_log('Youth Unity Cup failed admin shop reservation cleanup (' . get_class($exception) . ').');
+        }
+    }
+
+    public function delete(string $resource): void
+    {
+        $admin = $this->requireAdmin();
+        $redirect = '/admin/' . $resource;
+        $this->verifyCsrf($redirect);
+        try {
+            if ($resource === 'security') {
+                $ipInput = $_POST['ip_address'] ?? '';
+                if (!is_scalar($ipInput)) {
+                    throw new InvalidArgumentException('The selected IP address is not valid.');
+                }
+                $this->tournament->unblockIp((string) $ipInput, (int) $admin['id']);
+                yuc_flash('success', 'The IP block was removed.');
+            } else {
+                $idInput = $_POST['id'] ?? null;
+                $id = filter_var(is_scalar($idInput) ? $idInput : null, FILTER_VALIDATE_INT);
+                if ($id === false || $id < 1) {
+                    throw new InvalidArgumentException('The selected record is not valid.');
+                }
+                if ($resource === 'teams') {
+                    $this->tournament->deleteTeam($id, (int) $admin['id']);
+                    yuc_flash('success', 'Team deleted.');
+                } elseif ($resource === 'venues') {
+                    $this->tournament->deleteVenue($id, (int) $admin['id']);
+                    yuc_flash('success', 'Venue deleted.');
+                } elseif ($resource === 'fixtures') {
+                    $this->tournament->deleteFixture($id, (int) $admin['id']);
+                    yuc_flash('success', 'Fixture deleted.');
+                } elseif ($resource === 'registrations') {
+                    $this->tournament->deleteRegistration($id, (int) $admin['id']);
+                    yuc_flash('success', 'Registration deleted. Personal details were removed; the audit log retains only its reference.');
+                } elseif ($resource === 'products') {
+                    $deleted = $this->shop->deleteProduct($id, (int) $admin['id']);
+                    yuc_flash('success', $deleted ? 'Product deleted.' : 'Product has order history, so it was archived from the public catalog instead of being erased.');
+                } else {
+                    throw new InvalidArgumentException('Delete is not available for that record type.');
+                }
+            }
+        } catch (InvalidArgumentException $exception) {
+            yuc_flash('error', $exception->getMessage());
+        } catch (Throwable $exception) {
+            error_log('Youth Unity Cup record deletion failed (' . get_class($exception) . ').');
+            yuc_flash('error', 'The record could not be deleted. Check whether it is still referenced by tournament or order history.');
+        }
+        yuc_redirect($redirect);
+    }
+
+    public function archive(string $resource): void
+    {
+        $admin = $this->requireAdmin();
+        $redirect = '/admin/' . $resource;
+        $this->verifyCsrf($redirect);
+        $idInput = $_POST['id'] ?? null;
+        $id = filter_var(is_scalar($idInput) ? $idInput : null, FILTER_VALIDATE_INT);
+        if (!in_array($resource, ['transactions', 'orders'], true) || $id === false || $id < 1) {
+            yuc_flash('error', 'The selected record was not valid for archiving.');
+            yuc_redirect($redirect);
+        }
+        $archiveInput = $_POST['archived'] ?? '';
+        if (!is_scalar($archiveInput) || !in_array((string) $archiveInput, ['0', '1'], true)) {
+            yuc_flash('error', 'Choose a valid archive action.');
+            yuc_redirect($redirect);
+        }
+        try {
+            $archived = (string) $archiveInput === '1';
+            if ($resource === 'transactions') {
+                $this->tournament->setTransactionArchived($id, $archived, (int) $admin['id']);
+            } else {
+                $this->shop->setOrderArchived($id, $archived, (int) $admin['id']);
+            }
+            yuc_flash('success', $archived ? 'Record archived. The payment/audit history remains preserved.' : 'Record restored.');
+        } catch (InvalidArgumentException $exception) {
+            yuc_flash('error', $exception->getMessage());
+        } catch (Throwable $exception) {
+            error_log('Youth Unity Cup record archive failed (' . get_class($exception) . ').');
+            yuc_flash('error', 'The record could not be archived. Please try again.');
+        }
+        yuc_redirect($redirect);
     }
 
     public function unblockIp(): void

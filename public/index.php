@@ -111,9 +111,25 @@ try {
                 $getOperationsController()->manage($resource);
             });
         }
-        foreach (['teams', 'venues', 'fixtures', 'transactions', 'products'] as $resource) {
+        $router->post('/admin/orders/create', static function () use ($getOperationsController): void {
+            $getOperationsController()->createOrder();
+        });
+        foreach (['teams', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'security'] as $resource) {
             $router->post('/admin/' . $resource . '/save', static function () use ($getOperationsController, $resource): void {
                 $getOperationsController()->save($resource);
+            });
+        }
+        foreach (['teams', 'venues', 'fixtures', 'registrations', 'products'] as $resource) {
+            $router->post('/admin/' . $resource . '/delete', static function () use ($getOperationsController, $resource): void {
+                $getOperationsController()->delete($resource);
+            });
+        }
+        $router->post('/admin/security/delete', static function () use ($getOperationsController): void {
+            $getOperationsController()->delete('security');
+        });
+        foreach (['transactions', 'orders'] as $resource) {
+            $router->post('/admin/' . $resource . '/archive', static function () use ($getOperationsController, $resource): void {
+                $getOperationsController()->archive($resource);
             });
         }
         foreach (['teams', 'venues', 'registrations', 'transactions', 'orders'] as $resource) {

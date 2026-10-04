@@ -133,9 +133,76 @@ final class TournamentService
     public function blockedIps(): array
     {
         return $this->pdo->query(
-            'SELECT ip_address, blocked_until, reason, created_at FROM ip_blocks '
-            . 'WHERE blocked_until > UTC_TIMESTAMP() ORDER BY blocked_until DESC LIMIT 300'
+            'SELECT ip_address, blocked_until, reason, created_at, '
+            . 'GREATEST(1, CEIL(TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), blocked_until) / 60)) AS duration_minutes '
+            . 'FROM ip_blocks WHERE blocked_until > UTC_TIMESTAMP() ORDER BY blocked_until DESC LIMIT 300'
         )->fetchAll();
+    }
+
+    /** @param array<string,mixed> $data */
+    public function saveBlockedIp(array $data, int $adminId): void
+    {
+        $oldIpInput = $data['old_ip'] ?? '';
+        $ipInput = $data['ip_address'] ?? '';
+        $oldIp = is_scalar($oldIpInput) ? trim((string) $oldIpInput) : '';
+        $ipAddress = is_scalar($ipInput) ? trim((string) $ipInput) : '';
+        foreach ([$oldIp, $ipAddress] as $candidate) {
+            if ($candidate !== '' && $candidate !== 'unknown' && filter_var($candidate, FILTER_VALIDATE_IP) === false) {
+                throw new InvalidArgumentException('Enter a valid IPv4 or IPv6 address.');
+            }
+        }
+        if ($ipAddress === '') {
+            throw new InvalidArgumentException('An IP address is required.');
+        }
+        $durationInput = $data['duration_minutes'] ?? null;
+        $duration = filter_var(is_scalar($durationInput) ? $durationInput : null, FILTER_VALIDATE_INT);
+        if ($duration === false || $duration < 1 || $duration > 1440) {
+            throw new InvalidArgumentException('Block duration must be from 1 to 1440 minutes.');
+        }
+        $reasonInput = $data['reason'] ?? '';
+        $reason = is_scalar($reasonInput) ? trim((string) $reasonInput) : '';
+        if ($reason === '' || mb_strlen($reason) > 160) {
+            throw new InvalidArgumentException('Enter a reason of no more than 160 characters.');
+        }
+        if ($oldIp !== '') {
+            $existing = $this->findBlockedIp($oldIp);
+            if ($existing === null) {
+                throw new InvalidArgumentException('That active IP block no longer exists.');
+            }
+        }
+        if ($oldIp !== $ipAddress) {
+            // Expired rows still occupy the primary key until explicitly removed.
+            $this->pdo->prepare('DELETE FROM ip_blocks WHERE ip_address=:ip AND blocked_until<=UTC_TIMESTAMP()')
+                ->execute(['ip' => $ipAddress]);
+        }
+        if ($oldIp !== '' && $oldIp !== $ipAddress) {
+            $collision = $this->findBlockedIp($ipAddress);
+            if ($collision !== null) {
+                throw new InvalidArgumentException('That IP address already has an active block. Edit the existing block instead.');
+            }
+        } elseif ($oldIp === '' && $this->findBlockedIp($ipAddress) !== null) {
+            throw new InvalidArgumentException('That IP address is already blocked. Edit its current block instead.');
+        }
+
+        $blockedUntil = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+            ->modify('+' . $duration . ' minutes')->format('Y-m-d H:i:s');
+        if ($oldIp !== '') {
+            $statement = $this->pdo->prepare(
+                'UPDATE ip_blocks SET ip_address=:ip, blocked_until=:blocked_until, reason=:reason WHERE ip_address=:old_ip'
+            );
+            $statement->execute(['ip' => $ipAddress, 'blocked_until' => $blockedUntil, 'reason' => $reason, 'old_ip' => $oldIp]);
+            if ($statement->rowCount() < 1 && ($oldIp !== $ipAddress || $this->findBlockedIp($ipAddress) === null)) {
+                throw new InvalidArgumentException('That active IP block no longer exists.');
+            }
+            $this->audit($adminId, 'security.ip_block_updated', 'Updated IP block for ' . $ipAddress);
+            return;
+        }
+
+        $statement = $this->pdo->prepare(
+            'INSERT INTO ip_blocks (ip_address, blocked_until, reason, created_at) VALUES (:ip, :blocked_until, :reason, UTC_TIMESTAMP())'
+        );
+        $statement->execute(['ip' => $ipAddress, 'blocked_until' => $blockedUntil, 'reason' => $reason]);
+        $this->audit($adminId, 'security.ip_block_created', 'Created manual IP block for ' . $ipAddress);
     }
 
     public function unblockIp(string $ipAddress, int $adminId): void
@@ -152,12 +219,137 @@ final class TournamentService
     }
 
     /** @return list<array<string,mixed>> */
-    public function transactions(): array
+    public function transactions(bool $includeArchived = false): array
     {
+        $archiveFilter = $includeArchived ? ' WHERE t.archived_at IS NOT NULL' : ' WHERE t.archived_at IS NULL';
         return $this->pdo->query(
-            'SELECT id, reference, recipient_email, amount, currency, status, payment_provider, provider_reference, description, created_at '
-            . 'FROM transactions ORDER BY created_at DESC LIMIT 300'
+            'SELECT t.id, t.reference, t.recipient_email, t.amount, t.currency, t.status, t.payment_provider, '
+            . 't.provider_reference, t.description, t.created_at, t.archived_at, o.reference AS shop_order_reference, o.status AS shop_order_status '
+            . 'FROM transactions t LEFT JOIN shop_orders o ON o.transaction_id=t.id' . $archiveFilter
+            . ' ORDER BY t.created_at DESC, t.id DESC LIMIT 300'
         )->fetchAll();
+    }
+
+    /** @return array<string,mixed>|null */
+    public function findTransactionForAdmin(int $id): ?array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT t.id, t.reference, t.recipient_email, t.amount, t.currency, t.status, t.description, t.archived_at '
+            . 'FROM transactions t LEFT JOIN shop_orders o ON o.transaction_id=t.id '
+            . "WHERE t.id=:id AND t.payment_provider<>'payhub' AND o.id IS NULL LIMIT 1"
+        );
+        $statement->execute(['id' => $id]);
+        $row = $statement->fetch();
+        if (!is_array($row)) {
+            return null;
+        }
+        $row['amount'] = number_format((float) $row['amount'], 2, '.', '');
+        return $row;
+    }
+
+    /** @param array<string,mixed> $data */
+    public function saveTransaction(array $data, int $adminId): string
+    {
+        $rawId = $data['id'] ?? 0;
+        $id = filter_var(is_scalar($rawId) ? $rawId : 0, FILTER_VALIDATE_INT);
+        if ($id === false || $id < 0) {
+            throw new InvalidArgumentException('The selected transaction is not valid.');
+        }
+        if ($id === 0) {
+            return $this->createTransaction($data, $adminId);
+        }
+        $existing = $this->findTransactionForAdmin($id);
+        if ($existing === null) {
+            throw new InvalidArgumentException('Only manually recorded transactions without a linked shop order can be edited.');
+        }
+        if ($existing['archived_at'] !== null) {
+            throw new InvalidArgumentException('Restore the archived transaction before editing it.');
+        }
+        $referenceInput = $data['reference'] ?? '';
+        $reference = is_scalar($referenceInput) ? trim((string) $referenceInput) : '';
+        if (!preg_match('/^[A-Za-z0-9_-]{4,80}$/D', $reference)) {
+            throw new InvalidArgumentException('Transaction reference must use 4–80 letters, numbers, hyphens, or underscores.');
+        }
+        $emailInput = $data['recipient_email'] ?? '';
+        $email = is_scalar($emailInput) ? trim((string) $emailInput) : '';
+        if ($email !== '' && (strlen($email) > 190 || filter_var($email, FILTER_VALIDATE_EMAIL) === false)) {
+            throw new InvalidArgumentException('Enter a valid transaction recipient email.');
+        }
+        $amountRaw = $data['amount'] ?? '';
+        $amountInput = is_scalar($amountRaw) ? trim((string) $amountRaw) : '';
+        if (preg_match('/^\\d{1,10}(?:\\.\\d{1,2})?$/D', $amountInput) !== 1) {
+            throw new InvalidArgumentException('Enter a valid transaction amount with no more than two decimal places.');
+        }
+        $amount = (float) $amountInput;
+        if ($amount > 9999999999.99) {
+            throw new InvalidArgumentException('Enter a valid transaction amount.');
+        }
+        $currencyInput = $data['currency'] ?? 'NGN';
+        $currency = is_scalar($currencyInput) ? strtoupper(trim((string) $currencyInput)) : '';
+        if (!in_array($currency, ['NGN', 'USD', 'GBP', 'EUR'], true)) {
+            throw new InvalidArgumentException('Choose a supported transaction currency.');
+        }
+        $status = $this->oneOf($data['status'] ?? 'pending', ['pending', 'completed', 'failed', 'refunded'], 'Transaction status');
+        $descriptionInput = $data['description'] ?? '';
+        $description = mb_substr(is_scalar($descriptionInput) ? trim((string) $descriptionInput) : '', 0, 255);
+        $update = $this->pdo->prepare(
+            'UPDATE transactions SET reference=:reference, recipient_email=:email, amount=:amount, currency=:currency, '
+            . 'status=:status, description=:description, updated_at=UTC_TIMESTAMP() WHERE id=:id AND payment_provider<>\'payhub\''
+        );
+        $update->execute([
+            'reference' => $reference, 'email' => $email, 'amount' => number_format($amount, 2, '.', ''),
+            'currency' => $currency, 'status' => $status, 'description' => $description, 'id' => $id,
+        ]);
+        if ($update->rowCount() < 1 && $existing['reference'] !== $reference) {
+            throw new InvalidArgumentException('The transaction could not be updated.');
+        }
+        $this->audit($adminId, 'transaction.manual_updated', 'Updated manually recorded transaction ' . $reference);
+        if ((string) $existing['status'] !== $status) {
+            try {
+                $this->notifications->notifyTransaction(
+                    'status_changed',
+                    ['reference' => $reference, 'recipient_email' => $email, 'amount' => $amount, 'currency' => $currency, 'status' => $status, 'description' => $description],
+                    $email !== '' ? $email : null,
+                    $adminId
+                );
+            } catch (Throwable $exception) {
+                error_log('Youth Unity Cup transaction status notification failed (' . get_class($exception) . ').');
+            }
+        }
+        return $reference;
+    }
+
+    public function setTransactionArchived(int $id, bool $archived, int $adminId): void
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $query = $this->pdo->prepare(
+                'SELECT t.reference, t.payment_provider, o.id AS order_id FROM transactions t '
+                . 'LEFT JOIN shop_orders o ON o.transaction_id=t.id WHERE t.id=:id LIMIT 1 FOR UPDATE'
+            );
+            $query->execute(['id' => $id]);
+            $row = $query->fetch();
+            if (!is_array($row)) {
+                throw new InvalidArgumentException('That transaction no longer exists.');
+            }
+            if ((string) $row['payment_provider'] === 'payhub' || $row['order_id'] !== null) {
+                throw new InvalidArgumentException('PayHub and shop-order transactions remain in the payment ledger; manage or archive them through Shop orders.');
+            }
+            $timestamp = $archived ? gmdate('Y-m-d H:i:s') : null;
+            $this->pdo->prepare('UPDATE transactions SET archived_at=:archived_at, updated_at=UTC_TIMESTAMP() WHERE id=:id')
+                ->execute(['archived_at' => $timestamp, 'id' => $id]);
+            $this->audit(
+                $adminId,
+                $archived ? 'transaction.manual_archived' : 'transaction.manual_restored',
+                ($archived ? 'Archived' : 'Restored') . ' manually recorded transaction ' . (string) $row['reference']
+            );
+            $this->pdo->commit();
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $exception;
+        }
     }
 
     /** @return array<string,mixed>|null */
@@ -173,6 +365,100 @@ final class TournamentService
         $statement->execute(['id' => $id]);
         $row = $statement->fetch();
         return is_array($row) ? $row : null;
+    }
+
+    /** @return array<string,mixed>|null */
+    public function findRegistration(int $id): ?array
+    {
+        $statement = $this->pdo->prepare('SELECT * FROM registrations WHERE id=:id LIMIT 1');
+        $statement->execute(['id' => $id]);
+        $row = $statement->fetch();
+        return is_array($row) ? $row : null;
+    }
+
+    /** @return array<string,mixed>|null */
+    public function findBlockedIp(string $ipAddress): ?array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT ip_address, blocked_until, reason, created_at, '
+            . 'GREATEST(1, CEIL(TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), blocked_until) / 60)) AS duration_minutes '
+            . 'FROM ip_blocks WHERE ip_address=:ip AND blocked_until > UTC_TIMESTAMP() LIMIT 1'
+        );
+        $statement->execute(['ip' => $ipAddress]);
+        $row = $statement->fetch();
+        return is_array($row) ? $row : null;
+    }
+
+    public function deleteTeam(int $id, int $adminId): void
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $query = $this->pdo->prepare('SELECT name FROM teams WHERE id=:id LIMIT 1 FOR UPDATE');
+            $query->execute(['id' => $id]);
+            $name = $query->fetchColumn();
+            if (!is_string($name)) {
+                throw new InvalidArgumentException('That team no longer exists.');
+            }
+            $usage = $this->pdo->prepare('SELECT COUNT(*) FROM fixtures WHERE home_team_id=:home_id OR away_team_id=:away_id');
+            $usage->execute(['home_id' => $id, 'away_id' => $id]);
+            if ((int) $usage->fetchColumn() > 0) {
+                throw new InvalidArgumentException('This team is used in fixtures and cannot be deleted. Edit the team and set its status to inactive instead.');
+            }
+            $this->pdo->prepare('DELETE FROM teams WHERE id=:id')->execute(['id' => $id]);
+            $this->audit($adminId, 'tournament.team_deleted', 'Deleted team ' . $name);
+            $this->pdo->commit();
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
+    public function deleteVenue(int $id, int $adminId): void
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $query = $this->pdo->prepare('SELECT name FROM venues WHERE id=:id LIMIT 1 FOR UPDATE');
+            $query->execute(['id' => $id]);
+            $name = $query->fetchColumn();
+            if (!is_string($name)) {
+                throw new InvalidArgumentException('That venue no longer exists.');
+            }
+            $usage = $this->pdo->prepare('SELECT COUNT(*) FROM fixtures WHERE venue_id=:id');
+            $usage->execute(['id' => $id]);
+            if ((int) $usage->fetchColumn() > 0) {
+                throw new InvalidArgumentException('This venue is used in fixtures and cannot be deleted. Edit the venue and set its status to inactive instead.');
+            }
+            $this->pdo->prepare('DELETE FROM venues WHERE id=:id')->execute(['id' => $id]);
+            $this->audit($adminId, 'tournament.venue_deleted', 'Deleted venue ' . $name);
+            $this->pdo->commit();
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
+    public function deleteFixture(int $id, int $adminId): void
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $query = $this->pdo->prepare('SELECT id FROM fixtures WHERE id=:id LIMIT 1 FOR UPDATE');
+            $query->execute(['id' => $id]);
+            if ($query->fetchColumn() === false) {
+                throw new InvalidArgumentException('That fixture no longer exists.');
+            }
+            $this->pdo->prepare('DELETE FROM fixtures WHERE id=:id')->execute(['id' => $id]);
+            $this->audit($adminId, 'tournament.fixture_deleted', 'Deleted fixture #' . $id);
+            $this->pdo->commit();
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $exception;
+        }
     }
 
     /** @param array<string,mixed> $data */
@@ -304,9 +590,12 @@ final class TournamentService
         if ($category === 'player' && ($age === null || $age >= 19)) {
             throw new InvalidArgumentException('Player applications require an age under 19.');
         }
-        $zone = mb_substr(trim((string) ($data['zone'] ?? '')), 0, 50);
-        $teamName = mb_substr(trim((string) ($data['team_name'] ?? '')), 0, 120);
-        $details = mb_substr(trim((string) ($data['details'] ?? '')), 0, 2000);
+        $zoneInput = $data['zone'] ?? '';
+        $teamInput = $data['team_name'] ?? '';
+        $detailsInput = $data['details'] ?? '';
+        $zone = mb_substr(is_scalar($zoneInput) ? trim((string) $zoneInput) : '', 0, 50);
+        $teamName = mb_substr(is_scalar($teamInput) ? trim((string) $teamInput) : '', 0, 120);
+        $details = mb_substr(is_scalar($detailsInput) ? trim((string) $detailsInput) : '', 0, 2000);
         $ipAddress = filter_var($ipAddress, FILTER_VALIDATE_IP) !== false ? substr($ipAddress, 0, 45) : 'unknown';
         $rate = $this->pdo->prepare(
             "SELECT COUNT(*) FROM audit_logs WHERE event_key='registration.submitted' AND ip_address=:ip "
@@ -337,6 +626,111 @@ final class TournamentService
             error_log('Youth Unity Cup registration notification could not be queued (' . get_class($exception) . ').');
         }
         return $reference;
+    }
+
+    /** @param array<string,mixed> $data */
+    public function saveRegistration(array $data, int $adminId): string
+    {
+        $rawId = $data['id'] ?? 0;
+        $id = filter_var(is_scalar($rawId) ? $rawId : 0, FILTER_VALIDATE_INT);
+        if ($id === false || $id < 0) {
+            throw new InvalidArgumentException('The selected registration is not valid.');
+        }
+        $name = $this->text($data['full_name'] ?? '', 140, 'Full name');
+        $emailInput = $data['email'] ?? '';
+        $email = is_scalar($emailInput) ? trim((string) $emailInput) : '';
+        if (strlen($email) > 190 || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new InvalidArgumentException('Enter a valid email address.');
+        }
+        $phoneInput = $data['phone'] ?? '';
+        $phone = is_scalar($phoneInput) ? trim((string) $phoneInput) : '';
+        if (!is_scalar($phoneInput) || mb_strlen($phone) > 40 || ($phone !== '' && preg_match('/^[+0-9() .-]+$/D', $phone) !== 1)) {
+            throw new InvalidArgumentException('Enter a valid phone number or leave it blank.');
+        }
+        $category = $this->oneOf($data['category'] ?? '', ['player', 'team_official', 'vendor', 'volunteer', 'community'], 'Registration type');
+        $ageRaw = $data['age'] ?? '';
+        if (!is_scalar($ageRaw)) {
+            throw new InvalidArgumentException('Enter a valid age between 10 and 99.');
+        }
+        $ageInput = trim((string) $ageRaw);
+        $age = $ageInput === '' ? null : filter_var($ageInput, FILTER_VALIDATE_INT);
+        if ($age === false || ($age !== null && ($age < 10 || $age > 99))) {
+            throw new InvalidArgumentException('Enter a valid age between 10 and 99.');
+        }
+        if ($category === 'player' && ($age === null || $age >= 19)) {
+            throw new InvalidArgumentException('Player registrations require an age under 19.');
+        }
+        $zoneInput = $data['zone'] ?? '';
+        $teamInput = $data['team_name'] ?? '';
+        $detailsInput = $data['details'] ?? '';
+        $zone = mb_substr(is_scalar($zoneInput) ? trim((string) $zoneInput) : '', 0, 50);
+        $teamName = mb_substr(is_scalar($teamInput) ? trim((string) $teamInput) : '', 0, 120);
+        $details = mb_substr(is_scalar($detailsInput) ? trim((string) $detailsInput) : '', 0, 2000);
+        $status = $this->oneOf($data['status'] ?? 'new', ['new', 'reviewing', 'approved', 'rejected'], 'Registration status');
+
+        if ($id > 0) {
+            $query = $this->pdo->prepare('SELECT reference, full_name, email, status FROM registrations WHERE id=:id LIMIT 1');
+            $query->execute(['id' => $id]);
+            $existing = $query->fetch();
+            if (!is_array($existing)) {
+                throw new InvalidArgumentException('That registration no longer exists.');
+            }
+            $statusChanged = (string) $existing['status'] !== $status;
+            $update = $this->pdo->prepare(
+                'UPDATE registrations SET full_name=:name, email=:email, phone=:phone, category=:category, age=:age, '
+                . 'zone=:zone, team_name=:team_name, details=:details, status=:status, '
+                . 'reviewed_by=CASE WHEN :changed=1 THEN :admin_id ELSE reviewed_by END, '
+                . 'reviewed_at=CASE WHEN :changed_again=1 THEN UTC_TIMESTAMP() ELSE reviewed_at END WHERE id=:id'
+            );
+            $update->execute([
+                'name' => $name, 'email' => $email, 'phone' => $phone, 'category' => $category, 'age' => $age,
+                'zone' => $zone, 'team_name' => $teamName, 'details' => $details, 'status' => $status,
+                'changed' => $statusChanged ? 1 : 0, 'admin_id' => $adminId,
+                'changed_again' => $statusChanged ? 1 : 0, 'id' => $id,
+            ]);
+            $reference = (string) $existing['reference'];
+            $this->audit($adminId, 'registration.admin_updated', 'Updated registration ' . $reference);
+            if ($statusChanged) {
+                try {
+                    $this->notifications->notifyActivity(
+                        'registration.status_changed',
+                        'Youth Unity Cup registration update',
+                        "Hello {$name}, your registration {$reference} is now marked {$status}.",
+                        ['user_email' => $email, 'user_id' => $adminId, 'include_ip' => false, 'context' => ['reference' => $reference, 'status' => $status]]
+                    );
+                } catch (Throwable $exception) {
+                    error_log('Youth Unity Cup registration status notification failed (' . get_class($exception) . ').');
+                }
+            }
+            return $reference;
+        }
+
+        $reference = 'YUC-' . gmdate('ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
+        $reviewed = $status === 'new' ? null : $adminId;
+        $statement = $this->pdo->prepare(
+            'INSERT INTO registrations (reference, full_name, email, phone, category, age, zone, team_name, details, status, reviewed_by, reviewed_at, submitted_at) '
+            . 'VALUES (:reference, :name, :email, :phone, :category, :age, :zone, :team_name, :details, :status, :reviewed_by, '
+            . 'CASE WHEN :is_reviewed=1 THEN UTC_TIMESTAMP() ELSE NULL END, UTC_TIMESTAMP())'
+        );
+        $statement->execute([
+            'reference' => $reference, 'name' => $name, 'email' => $email, 'phone' => $phone, 'category' => $category,
+            'age' => $age, 'zone' => $zone, 'team_name' => $teamName, 'details' => $details, 'status' => $status,
+            'reviewed_by' => $reviewed, 'is_reviewed' => $reviewed === null ? 0 : 1,
+        ]);
+        $this->audit($adminId, 'registration.admin_created', 'Created registration ' . $reference);
+        return $reference;
+    }
+
+    public function deleteRegistration(int $id, int $adminId): void
+    {
+        $query = $this->pdo->prepare('SELECT reference FROM registrations WHERE id=:id LIMIT 1');
+        $query->execute(['id' => $id]);
+        $reference = $query->fetchColumn();
+        if (!is_string($reference)) {
+            throw new InvalidArgumentException('That registration no longer exists.');
+        }
+        $this->pdo->prepare('DELETE FROM registrations WHERE id=:id')->execute(['id' => $id]);
+        $this->audit($adminId, 'registration.admin_deleted', 'Deleted registration ' . $reference);
     }
 
     public function updateRegistrationStatus(int $id, string $status, int $adminId): void
@@ -370,18 +764,21 @@ final class TournamentService
     /** @param array<string,mixed> $data */
     public function createTransaction(array $data, int $adminId): string
     {
-        $reference = trim((string) ($data['reference'] ?? ''));
+        $referenceInput = $data['reference'] ?? '';
+        $reference = is_scalar($referenceInput) ? trim((string) $referenceInput) : '';
         if ($reference === '') {
             $reference = 'YUCT-' . gmdate('ymd') . '-' . strtoupper(bin2hex(random_bytes(4)));
         }
         if (!preg_match('/^[A-Za-z0-9_-]{4,80}$/', $reference)) {
             throw new InvalidArgumentException('Transaction reference must use 4–80 letters, numbers, hyphens, or underscores.');
         }
-        $email = trim((string) ($data['recipient_email'] ?? ''));
+        $emailInput = $data['recipient_email'] ?? '';
+        $email = is_scalar($emailInput) ? trim((string) $emailInput) : '';
         if ($email !== '' && (strlen($email) > 190 || filter_var($email, FILTER_VALIDATE_EMAIL) === false)) {
             throw new InvalidArgumentException('Enter a valid transaction recipient email.');
         }
-        $amountInput = trim((string) ($data['amount'] ?? ''));
+        $amountRaw = $data['amount'] ?? '';
+        $amountInput = is_scalar($amountRaw) ? trim((string) $amountRaw) : '';
         if (preg_match('/^\\d{1,10}(?:\\.\\d{1,2})?$/D', $amountInput) !== 1) {
             throw new InvalidArgumentException('Enter a valid transaction amount with no more than two decimal places.');
         }
@@ -389,12 +786,14 @@ final class TournamentService
         if ($amount > 9999999999.99) {
             throw new InvalidArgumentException('Enter a valid transaction amount.');
         }
-        $currency = strtoupper(trim((string) ($data['currency'] ?? 'NGN')));
+        $currencyInput = $data['currency'] ?? 'NGN';
+        $currency = is_scalar($currencyInput) ? strtoupper(trim((string) $currencyInput)) : '';
         if (!in_array($currency, ['NGN', 'USD', 'GBP', 'EUR'], true)) {
             throw new InvalidArgumentException('Choose a supported transaction currency.');
         }
         $status = $this->oneOf($data['status'] ?? 'pending', ['pending', 'completed', 'failed', 'refunded'], 'Transaction status');
-        $description = mb_substr(trim((string) ($data['description'] ?? '')), 0, 255);
+        $descriptionInput = $data['description'] ?? '';
+        $description = mb_substr(is_scalar($descriptionInput) ? trim((string) $descriptionInput) : '', 0, 255);
         $statement = $this->pdo->prepare(
             'INSERT INTO transactions (reference, user_id, recipient_email, amount, currency, status, description, created_at, updated_at) '
             . 'VALUES (:reference, NULL, :email, :amount, :currency, :status, :description, UTC_TIMESTAMP(), UTC_TIMESTAMP())'
@@ -405,20 +804,28 @@ final class TournamentService
         } catch (Throwable $exception) {
             error_log('Youth Unity Cup transaction notification could not be queued (' . get_class($exception) . ').');
         }
+        $this->audit($adminId, 'transaction.manual_created', 'Recorded manually entered transaction ' . $reference);
         return $reference;
     }
 
     public function updateTransactionStatus(int $id, string $status, int $adminId): void
     {
         $status = $this->oneOf($status, ['pending', 'completed', 'failed', 'refunded'], 'Transaction status');
-        $statement = $this->pdo->prepare('SELECT reference, recipient_email, amount, currency, status, payment_provider, description FROM transactions WHERE id=:id LIMIT 1');
+        $statement = $this->pdo->prepare(
+            'SELECT t.reference, t.recipient_email, t.amount, t.currency, t.status, t.payment_provider, t.archived_at, t.description, '
+            . 'EXISTS(SELECT 1 FROM shop_orders o WHERE o.transaction_id=t.id) AS has_shop_order '
+            . 'FROM transactions t WHERE t.id=:id LIMIT 1'
+        );
         $statement->execute(['id' => $id]);
         $row = $statement->fetch();
         if (!is_array($row)) {
             throw new InvalidArgumentException('That transaction no longer exists.');
         }
-        if ((string) ($row['payment_provider'] ?? '') === 'payhub') {
-            throw new InvalidArgumentException('PayHub transaction status is updated only after server-side payment verification. Manage fulfillment in Shop orders.');
+        if ((string) ($row['payment_provider'] ?? '') === 'payhub' || (int) ($row['has_shop_order'] ?? 0) === 1) {
+            throw new InvalidArgumentException('PayHub and shop-order transactions are updated only after server-side payment verification. Manage fulfillment in Shop orders.');
+        }
+        if ($row['archived_at'] !== null) {
+            throw new InvalidArgumentException('Restore the archived transaction before changing its status.');
         }
         if ($row['status'] === $status) {
             return;
@@ -480,6 +887,9 @@ final class TournamentService
     /** @param array<string,mixed> $data */
     private function text(mixed $value, int $max, string $label): string
     {
+        if (!is_scalar($value)) {
+            throw new InvalidArgumentException($label . ' is required and must be no longer than ' . $max . ' characters.');
+        }
         $text = trim((string) $value);
         if ($text === '' || mb_strlen($text) > $max) {
             throw new InvalidArgumentException($label . ' is required and must be no longer than ' . $max . ' characters.');
@@ -490,7 +900,7 @@ final class TournamentService
     /** @param list<string> $allowed */
     private function oneOf(mixed $value, array $allowed, string $label): string
     {
-        $text = (string) $value;
+        $text = is_scalar($value) ? (string) $value : '';
         if (!in_array($text, $allowed, true)) {
             throw new InvalidArgumentException('Choose a valid ' . strtolower($label) . '.');
         }

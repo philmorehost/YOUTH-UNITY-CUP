@@ -37,7 +37,7 @@ Open `http://localhost:8080/`. The first request redirects to `/install`. Licens
 2. Enable HTTPS and the Apache rewrite module if deploying with the supplied `public/.htaccess`.
 3. Create an empty MySQL/MariaDB database and a least-privilege database account.
 4. Visit `/install`, complete each stage, and sign in at `/admin/login`.
-5. For an already-installed site upgrading from the original installer schema, back up the database and run `php /absolute/path/to/YOUTH-UNITY-CUP/bin/migrate-schema.php` once with the configured database account before using the new tournament or shop routes. The migration uses non-destructive `CREATE TABLE IF NOT EXISTS` statements, adds missing transaction recipient/provider columns and the unique provider-reference index, creates the shop catalog/order tables, and adds order verification and inventory-reservation fields when absent.
+5. For an already-installed site upgrading from the original installer schema, back up the database and run `php /absolute/path/to/YOUTH-UNITY-CUP/bin/migrate-schema.php` once with the configured database account before using the new tournament or shop routes. The migration uses non-destructive `CREATE TABLE IF NOT EXISTS` statements, adds missing transaction recipient/provider/archive columns and the unique provider-reference index, creates the shop catalog/order tables, and adds order verification, inventory-reservation, and archive fields when absent.
 6. Configure the PayHub secret and webhook/return URLs as described in **PayHub shop setup** below before opening `/shop` for real orders.
 7. Confirm SMTP delivery from the dashboard's **Send a test notification** action. Without SMTP, mail remains in the database outbox and is not silently discarded.
 8. Schedule the outbox worker (for example once per minute), running as the same OS account that serves PHP, to retry temporary SMTP failures:
@@ -61,7 +61,9 @@ The integration uses `https://merchant.payhub.com.ng/api/transaction/initialize`
 ## What is included
 
 - Clean-path front controller and a small PSR-4-style autoloader
-- `/admin/teams`, `/admin/venues`, `/admin/fixtures`, `/admin/products`, and `/admin/orders` management with public `/teams`, `/fixtures`, `/results`, `/venues`, and `/shop` pages
+- `/admin/teams`, `/admin/venues`, `/admin/fixtures`, `/admin/registrations`, `/admin/transactions`, `/admin/products`, `/admin/orders`, and `/admin/security` management with public `/teams`, `/fixtures`, `/results`, `/venues`, and `/shop` pages
+- Instant client-side admin search across teams, venues, fixtures/scores, registrations, transactions, shop products/orders, and blocked IPs; record controls are CSRF-protected and critical deletes require confirmation
+- Safe management rules: PayHub payment data stays server-verified; admin-created shop orders use the same atomic stock reservation and PayHub initialization path as checkout, while later edits are limited to customer/fulfillment details; closed orders and manual transactions are archived with their audit/payment history retained
 - Public `/registration` application form, administrator review workflow, and status emails
 - Admin settings for site title/contact, time zone, SMTP delivery, server-side PayHub secret key, login-attempt thresholds, and IP-block duration; searchable, paginated `/admin/activity` audit history
 - CSRF-protected, four-stage installer
@@ -89,4 +91,4 @@ The integration uses `https://merchant.payhub.com.ng/api/transaction/initialize`
 
 ## Validation before release
 
-Run PHP's syntax checker on every PHP file, `php tests/payhub-security.php`, and `php tests/shop-template-smoke.php`; complete the installer against a disposable MySQL database, verify both a successful SMTP test and the queued/retry path, and exercise PayHub initialization, a signed webhook, and the payment-return verification before production deployment. Never test schema changes against the live tournament database.
+Run PHP's syntax checker on every PHP file, `php tests/payhub-security.php`, `php tests/shop-template-smoke.php`, and `php tests/admin-management-smoke.php`; complete the installer against a disposable MySQL database, verify both a successful SMTP test and the queued/retry path, and exercise PayHub initialization, a signed webhook, and the payment-return verification before production deployment. Never test schema changes against the live tournament database.

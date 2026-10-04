@@ -37,6 +37,7 @@ final class SchemaInstaller
             'recipient_email' => "ALTER TABLE transactions ADD recipient_email VARCHAR(190) NOT NULL DEFAULT '' AFTER user_id",
             'payment_provider' => "ALTER TABLE transactions ADD payment_provider VARCHAR(30) NOT NULL DEFAULT '' AFTER status",
             'provider_reference' => "ALTER TABLE transactions ADD provider_reference VARCHAR(120) NULL AFTER payment_provider",
+            'archived_at' => "ALTER TABLE transactions ADD archived_at DATETIME NULL AFTER updated_at",
         ];
         foreach ($transactionColumns as $column => $alterSql) {
             $columnInfo = $pdo->query("SHOW COLUMNS FROM transactions LIKE '" . $column . "'")->fetch();
@@ -55,6 +56,7 @@ final class SchemaInstaller
             'provider_currency' => "ALTER TABLE shop_orders ADD provider_currency CHAR(3) NULL AFTER provider_amount_kobo",
             'payment_review_reason' => "ALTER TABLE shop_orders ADD payment_review_reason VARCHAR(120) NULL AFTER provider_currency",
             'stock_reserved' => "ALTER TABLE shop_orders ADD stock_reserved TINYINT(1) NOT NULL DEFAULT 1 AFTER total_kobo",
+            'archived_at' => "ALTER TABLE shop_orders ADD archived_at DATETIME NULL AFTER updated_at",
         ];
         foreach ($orderColumns as $column => $alterSql) {
             $columnInfo = $pdo->query("SHOW COLUMNS FROM shop_orders LIKE '" . $column . "'")->fetch();

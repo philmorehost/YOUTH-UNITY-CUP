@@ -37,8 +37,9 @@ final class ShopService
     public function adminProducts(): array
     {
         return $this->pdo->query(
-            'SELECT id, sku, name, description, price_kobo, stock_quantity, status, created_at, updated_at '
-            . 'FROM shop_products ORDER BY updated_at DESC, id DESC LIMIT 500'
+            'SELECT p.id, p.sku, p.name, p.description, p.price_kobo, p.stock_quantity, p.status, p.created_at, p.updated_at, '
+            . '(SELECT COUNT(*) FROM shop_order_items i WHERE i.product_id=p.id) AS order_item_count '
+            . 'FROM shop_products p ORDER BY p.updated_at DESC, p.id DESC LIMIT 500'
         )->fetchAll();
     }
 
@@ -118,6 +119,37 @@ final class ShopService
         $this->audit($adminId, 'transaction.shop_product_created', 'Created shop product ' . $sku);
     }
 
+    public function deleteProduct(int $id, int $adminId): bool
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $query = $this->pdo->prepare('SELECT sku, name FROM shop_products WHERE id=:id LIMIT 1 FOR UPDATE');
+            $query->execute(['id' => $id]);
+            $product = $query->fetch();
+            if (!is_array($product)) {
+                throw new InvalidArgumentException('That product no longer exists.');
+            }
+            $usage = $this->pdo->prepare('SELECT COUNT(*) FROM shop_order_items WHERE product_id=:id');
+            $usage->execute(['id' => $id]);
+            $hasOrderHistory = (int) $usage->fetchColumn() > 0;
+            if ($hasOrderHistory) {
+                $this->pdo->prepare("UPDATE shop_products SET status='inactive', updated_at=UTC_TIMESTAMP() WHERE id=:id")
+                    ->execute(['id' => $id]);
+                $this->audit($adminId, 'transaction.shop_product_archived', 'Archived shop product ' . (string) $product['sku']);
+            } else {
+                $this->pdo->prepare('DELETE FROM shop_products WHERE id=:id')->execute(['id' => $id]);
+                $this->audit($adminId, 'transaction.shop_product_deleted', 'Deleted shop product ' . (string) $product['sku']);
+            }
+            $this->pdo->commit();
+            return !$hasOrderHistory;
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
     /**
      * Validate current product/price/stock data and reserve inventory atomically.
      * Prices and names in the order are snapshots and cannot change with the catalog.
@@ -125,7 +157,7 @@ final class ShopService
      * @param array<string,mixed> $input
      * @return array{reference:string,name:string,email:string,phone:string,total_kobo:int}
      */
-    public function createOrder(array $input, string $ipAddress = 'unknown'): array
+    public function createOrder(array $input, string $ipAddress = 'unknown', ?int $actorId = null): array
     {
         $name = self::formText($input['customer_name'] ?? '');
         if ($name === '' || mb_strlen($name) > 140) {
@@ -266,7 +298,7 @@ final class ShopService
                     'line_total' => $line['line_total_kobo'],
                 ]);
             }
-            $this->writeAudit(null, 'transaction.shop_order_created', 'Shop order ' . $reference . ' reserved inventory', $ipAddress, [
+            $this->writeAudit($actorId, 'transaction.shop_order_created', 'Shop order ' . $reference . ' reserved inventory', $ipAddress, [
                 'reference' => $reference,
                 'total_kobo' => $totalKobo,
                 'item_count' => count($lines),
@@ -417,11 +449,14 @@ final class ShopService
     {
         $this->pdo->beginTransaction();
         try {
-            $query = $this->pdo->prepare('SELECT id, reference, transaction_id, status, stock_reserved FROM shop_orders WHERE id=:id LIMIT 1 FOR UPDATE');
+            $query = $this->pdo->prepare('SELECT id, reference, transaction_id, status, stock_reserved, archived_at FROM shop_orders WHERE id=:id LIMIT 1 FOR UPDATE');
             $query->execute(['id' => $id]);
             $order = $query->fetch();
             if (!is_array($order)) {
                 throw new InvalidArgumentException('That order no longer exists.');
+            }
+            if ($order['archived_at'] !== null) {
+                throw new InvalidArgumentException('Restore the archived order before changing its status.');
             }
 
             $current = (string) $order['status'];
@@ -464,19 +499,103 @@ final class ShopService
         }
     }
 
+    /** @return array<string,mixed>|null */
+    public function findOrderForAdmin(int $id): ?array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT o.id, o.reference, o.customer_name, o.customer_email, o.customer_phone, o.fulfillment_notes, '
+            . 'o.status, o.archived_at FROM shop_orders o WHERE o.id=:id LIMIT 1'
+        );
+        $statement->execute(['id' => $id]);
+        $row = $statement->fetch();
+        return is_array($row) ? $row : null;
+    }
+
+    /** @param array<string,mixed> $data */
+    public function updateOrderDetails(array $data, int $adminId): void
+    {
+        $id = filter_var(is_scalar($data['id'] ?? null) ? $data['id'] : null, FILTER_VALIDATE_INT);
+        if ($id === false || $id < 1) {
+            throw new InvalidArgumentException('The selected order is not valid.');
+        }
+        $name = self::formText($data['customer_name'] ?? '');
+        if ($name === '' || mb_strlen($name) > 140) {
+            throw new InvalidArgumentException('Customer name is required and must be at most 140 characters.');
+        }
+        $email = self::formText($data['customer_email'] ?? '');
+        if (strlen($email) > 190 || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new InvalidArgumentException('Enter a valid customer email address.');
+        }
+        $phone = self::formText($data['customer_phone'] ?? '');
+        if (mb_strlen($phone) > 40 || ($phone !== '' && preg_match('/^[+0-9() .-]+$/D', $phone) !== 1)) {
+            throw new InvalidArgumentException('Enter a valid customer phone number or leave it blank.');
+        }
+        $notes = self::formText($data['fulfillment_notes'] ?? '');
+        if (mb_strlen($notes) > 500) {
+            throw new InvalidArgumentException('Fulfillment notes must be at most 500 characters.');
+        }
+        $query = $this->pdo->prepare('SELECT reference, archived_at FROM shop_orders WHERE id=:id LIMIT 1');
+        $query->execute(['id' => $id]);
+        $order = $query->fetch();
+        if (!is_array($order)) {
+            throw new InvalidArgumentException('That order no longer exists.');
+        }
+        if ($order['archived_at'] !== null) {
+            throw new InvalidArgumentException('Restore the archived order before editing it.');
+        }
+        $this->pdo->prepare(
+            'UPDATE shop_orders SET customer_name=:name, customer_email=:email, customer_phone=:phone, '
+            . 'fulfillment_notes=:notes, updated_at=UTC_TIMESTAMP() WHERE id=:id'
+        )->execute(['name' => $name, 'email' => $email, 'phone' => $phone, 'notes' => $notes, 'id' => $id]);
+        $this->audit($adminId, 'transaction.shop_order_details_updated', 'Updated customer or fulfillment details for order ' . (string) $order['reference']);
+    }
+
+    public function setOrderArchived(int $id, bool $archived, int $adminId): void
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $query = $this->pdo->prepare('SELECT reference, status, archived_at FROM shop_orders WHERE id=:id LIMIT 1 FOR UPDATE');
+            $query->execute(['id' => $id]);
+            $order = $query->fetch();
+            if (!is_array($order)) {
+                throw new InvalidArgumentException('That order no longer exists.');
+            }
+            if ($archived && !in_array((string) $order['status'], ['fulfilled', 'payment_failed', 'cancelled'], true)) {
+                throw new InvalidArgumentException('Only fulfilled, failed, or cancelled orders can be archived. Complete or cancel the order first so active payment review and stock reservations are not hidden.');
+            }
+            $timestamp = $archived ? gmdate('Y-m-d H:i:s') : null;
+            $this->pdo->prepare('UPDATE shop_orders SET archived_at=:archived_at, updated_at=UTC_TIMESTAMP() WHERE id=:id')
+                ->execute(['archived_at' => $timestamp, 'id' => $id]);
+            $this->writeAudit(
+                $adminId,
+                $archived ? 'transaction.shop_order_archived' : 'transaction.shop_order_restored',
+                ($archived ? 'Archived' : 'Restored') . ' shop order ' . (string) $order['reference'],
+                $this->clientIp(),
+                ['reference' => (string) $order['reference'], 'status' => (string) $order['status']]
+            );
+            $this->pdo->commit();
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
     /** @return list<array<string,mixed>> */
-    public function orders(): array
+    public function orders(bool $includeArchived = false): array
     {
         $this->releaseExpiredReservations();
+        $archiveFilter = $includeArchived ? ' WHERE o.archived_at IS NOT NULL' : ' WHERE o.archived_at IS NULL';
         return $this->pdo->query(
-            'SELECT o.id, o.reference, o.customer_name, o.customer_email, o.customer_phone, o.fulfillment_notes, '
-            . 'o.total_kobo, o.status, o.reservation_expires_at, o.paid_at, o.fulfilled_at, o.created_at, '
+            'SELECT o.id, o.reference, o.customer_name, o.customer_email, o.customer_phone, o.fulfillment_notes, o.checkout_url, '
+            . 'o.total_kobo, o.status, o.reservation_expires_at, o.paid_at, o.fulfilled_at, o.created_at, o.archived_at, '
             . 'o.provider_amount_kobo, o.provider_currency, o.payment_review_reason, '
             . 't.provider_reference, t.status AS transaction_status, '
             . '(SELECT GROUP_CONCAT(CONCAT(i.quantity, \' × \', i.product_name) ORDER BY i.id SEPARATOR \', \') '
             . 'FROM shop_order_items i WHERE i.order_id=o.id) AS item_summary '
-            . 'FROM shop_orders o INNER JOIN transactions t ON t.id=o.transaction_id '
-            . 'ORDER BY o.created_at DESC, o.id DESC LIMIT 300'
+            . 'FROM shop_orders o INNER JOIN transactions t ON t.id=o.transaction_id' . $archiveFilter
+            . ' ORDER BY o.created_at DESC, o.id DESC LIMIT 300'
         )->fetchAll();
     }
 
