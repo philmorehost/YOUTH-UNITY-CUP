@@ -58,6 +58,7 @@ $appTimezone = (string) ($appTimezone ?? 'Africa/Lagos');
         <a href="/admin/products"><span class="quick-nav-icon">◈</span><span><strong>Shop products</strong><small>Catalog and stock</small></span><b>→</b></a>
         <a href="/admin/orders"><span class="quick-nav-icon">▣</span><span><strong>Shop orders</strong><small>Payment and fulfillment</small></span><b>→</b></a>
         <a href="/admin/homepage-hero"><span class="quick-nav-icon">▣</span><span><strong>Homepage hero</strong><small>Image, YouTube, video</small></span><b>→</b></a>
+        <a href="/admin/live-stream"><span class="quick-nav-icon">▶</span><span><strong>Watch live</strong><small>YouTube or TikTok LIVE</small></span><b>→</b></a>
         <a href="/admin/settings"><span class="quick-nav-icon">⚙</span><span><strong>Site &amp; security</strong><small>Details, SMTP, limits</small></span><b>→</b></a>
         <a href="/admin/security"><span class="quick-nav-icon">⌑</span><span><strong>Blocked IP access</strong><small><?= (int) ($tournamentCounts['blocked_ips'] ?? 0) ?> active blocks</small></span><b>→</b></a>
         <a href="/admin/activity"><span class="quick-nav-icon">≋</span><span><strong>Audit activity</strong><small>Recent system changes</small></span><b>→</b></a>

@@ -11,6 +11,13 @@ $venueCount = max(0, (int) ($venueCount ?? 0));
 $appTimezone = (string) ($appTimezone ?? 'Africa/Lagos');
 $heroSettings = is_array($heroSettings ?? null) ? $heroSettings : [];
 $heroType = in_array(($heroSettings['type'] ?? 'default'), ['default', 'image', 'youtube', 'video'], true) ? $heroSettings['type'] : 'default';
+$liveStream = is_array($liveStream ?? null) ? $liveStream : [];
+$liveStreamEnabled = !empty($liveStream['enabled']) && is_string($liveStream['url'] ?? null) && $liveStream['url'] !== '';
+$liveStreamPlatform = in_array(($liveStream['platform'] ?? ''), ['youtube', 'tiktok'], true) ? $liveStream['platform'] : '';
+$liveStreamProviderName = $liveStreamPlatform === 'tiktok' ? 'TikTok' : 'YouTube';
+$liveStreamEmbed = is_string($liveStream['embed_url'] ?? null) ? $liveStream['embed_url'] : '';
+$liveStreamTitle = trim((string) ($liveStream['title'] ?? 'Youth Unity Cup Live')) ?: 'Youth Unity Cup Live';
+$liveStreamCanEmbed = $liveStreamEnabled && $liveStreamPlatform === 'youtube' && $liveStreamEmbed !== '';
 ?>
 <section class="public-content-wrap home-content-wrap">
     <section class="home-hero" aria-labelledby="home-title">
@@ -31,12 +38,31 @@ $heroType = in_array(($heroSettings['type'] ?? 'default'), ['default', 'image', 
             <p>Local pride. Big-game energy. The Youth Unity Cup puts community football, young talent, and a shared love of the game in the spotlight.</p>
             <div class="home-hero-actions">
                 <a class="button button-primary" href="/fixtures">Explore fixtures <span aria-hidden="true">→</span></a>
+                <?php if ($liveStreamEnabled): ?>
+                    <?php $watchLiveHref = $liveStreamCanEmbed ? '#live-stream' : $liveStream['url']; ?>
+                    <a class="button button-live" href="<?= yuc_e($watchLiveHref) ?>" <?= $liveStreamCanEmbed ? '' : 'target="_blank" rel="noopener noreferrer"' ?>><span class="live-button-dot" aria-hidden="true"></span>Watch live <span aria-hidden="true">↗</span></a>
+                <?php endif; ?>
                 <a class="button button-outline" href="/teams">Meet the teams</a>
             </div>
         </div>
         <div class="home-hero-season"><strong><?= yuc_e(yuc_current_year($appTimezone)) ?> SEASON</strong><span>COMMUNITY FOOTBALL · LAGOS</span></div>
         <div class="home-hero-edge" aria-hidden="true"><span>UNITY</span><span>·</span><span>PRIDE</span><span>·</span><span>PLAY</span></div>
     </section>
+
+    <?php if ($liveStreamEnabled): ?>
+        <section id="live-stream" class="home-live-panel <?= $liveStreamCanEmbed ? 'has-embedded-player' : 'has-external-player' ?>" aria-labelledby="home-live-title">
+            <div class="home-live-heading">
+                <div><span class="home-live-kicker"><i aria-hidden="true"></i>YOUTH UNITY CUP · ON AIR</span><h2 id="home-live-title"><?= yuc_e($liveStreamTitle) ?></h2><p>Join the tournament live from the official broadcast.</p></div>
+                <span class="home-live-platform"><?= yuc_e(strtoupper($liveStreamPlatform)) ?> LIVE</span>
+            </div>
+            <?php if ($liveStreamCanEmbed): ?>
+                <div class="home-live-player"><iframe src="<?= yuc_e($liveStreamEmbed) ?>" title="<?= yuc_e($liveStreamTitle) ?> — live football broadcast" loading="eager" allow="autoplay; encrypted-media; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+                <p class="home-live-autoplay-note">Playback starts muted where your browser permits autoplay. Use the player controls to turn sound on. <a href="<?= yuc_e($liveStream['url']) ?>" target="_blank" rel="noopener noreferrer">Open directly on YouTube ↗</a></p>
+            <?php else: ?>
+                <div class="home-live-external"><span class="home-live-external-icon" aria-hidden="true">▶</span><div><strong>Continue to the live broadcast</strong><p><?= $liveStreamPlatform === 'tiktok' ? 'TikTok does not provide an official embeddable player for TikTok LIVE; open the live channel on TikTok to watch.' : 'This YouTube channel link is not directly embeddable. Open it on YouTube to watch the current broadcast.' ?></p></div><a class="button button-live" href="<?= yuc_e($liveStream['url']) ?>" target="_blank" rel="noopener noreferrer">Watch on <?= yuc_e($liveStreamProviderName) ?> <span aria-hidden="true">↗</span></a></div>
+            <?php endif; ?>
+        </section>
+    <?php endif; ?>
 
     <nav class="public-section-nav" aria-label="Tournament pages">
         <a href="/" class="active">Home</a><a href="/teams">Teams &amp; groups</a><a href="/fixtures">Fixtures</a><a href="/results">Results</a><a href="/venues">Venues</a><a href="/registration">Registration</a><a href="/shop">Official shop</a>

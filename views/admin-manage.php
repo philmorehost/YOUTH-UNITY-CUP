@@ -10,12 +10,13 @@
 /** @var array{type:string,message:string}|null $flash */
 $resourceTitles = [
     'teams' => 'Teams', 'players' => 'Player profiles', 'venues' => 'Venues', 'fixtures' => 'Fixtures & scores',
-    'registrations' => 'Registrations', 'transactions' => 'Transactions', 'products' => 'Shop products', 'orders' => 'Shop orders', 'settings' => 'Site & security settings', 'homepage-hero' => 'Homepage hero', 'security' => 'Blocked IP access', 'activity' => 'Audit activity',
+    'registrations' => 'Registrations', 'transactions' => 'Transactions', 'products' => 'Shop products', 'orders' => 'Shop orders', 'settings' => 'Site & security settings', 'homepage-hero' => 'Homepage hero', 'live-stream' => 'Watch live', 'security' => 'Blocked IP access', 'activity' => 'Audit activity',
 ];
 $title = $resourceTitles[$resource] ?? 'Admin';
 $formValues = is_array($formValues ?? null) ? $formValues : [];
 $settings = is_array($settings ?? null) ? $settings : [];
 $heroSettings = is_array($heroSettings ?? null) ? $heroSettings : [];
+$liveStreamSettings = is_array($liveStreamSettings ?? null) ? $liveStreamSettings : [];
 $mail = is_array($mail ?? null) ? $mail : [];
 $auditTotal = (int) ($auditTotal ?? 0);
 $auditPage = max(1, (int) ($auditPage ?? 1));
@@ -62,6 +63,7 @@ $venues = is_array($venues ?? null) ? $venues : [];
         <a href="/admin/products" class="<?= $resource === 'products' ? 'active' : '' ?>">Shop products</a>
         <a href="/admin/orders" class="<?= $resource === 'orders' ? 'active' : '' ?>">Shop orders</a>
         <a href="/admin/homepage-hero" class="<?= $resource === 'homepage-hero' ? 'active' : '' ?>">Homepage hero</a>
+        <a href="/admin/live-stream" class="<?= $resource === 'live-stream' ? 'active' : '' ?>">Watch live</a>
         <a href="/admin/settings" class="<?= $resource === 'settings' ? 'active' : '' ?>">Settings</a>
         <a href="/admin/security" class="<?= $resource === 'security' ? 'active' : '' ?>">Blocked IPs</a>
         <a href="/admin/activity" class="<?= $resource === 'activity' ? 'active' : '' ?>">Audit activity</a>
@@ -350,6 +352,44 @@ $venues = is_array($venues ?? null) ? $venues : [];
                 <div class="form-actions"><button class="button button-primary" type="submit" <?= $siteMode === 'demo' ? 'disabled' : '' ?>>Save homepage hero</button></div>
             </form>
         </section>
+
+    <?php elseif ($resource === 'live-stream'): ?>
+        <?php
+        $liveStreamForm = array_merge(
+            ['enabled' => '0', 'title' => 'Youth Unity Cup Live', 'url' => ''],
+            $liveStreamSettings,
+            $formValues
+        );
+        $liveStreamEnabledValue = is_scalar($liveStreamForm['enabled'] ?? null) && (string) $liveStreamForm['enabled'] === '1';
+        ?>
+        <div class="ops-grid live-stream-admin-grid">
+            <section class="panel ops-form-panel live-stream-settings-panel">
+                <div class="panel-kicker">MATCHDAY BROADCAST</div>
+                <h2>Configure Watch live</h2>
+                <p class="panel-intro">Add a YouTube or TikTok LIVE link. When enabled, the public landing page shows a Watch live button and opens the broadcast section.</p>
+                <?php if ($siteMode === 'demo'): ?><div class="alert alert-info" role="status"><span class="alert-icon" aria-hidden="true">i</span><p>Live-stream settings are read-only in Demo mode. Switch to Production to change the public broadcast.</p></div><?php endif; ?>
+                <form method="post" action="/admin/live-stream/save" class="form-stack">
+                    <?= yuc_csrf_field() ?>
+                    <div class="field-group"><label for="live-stream-enabled">Watch live button</label><select id="live-stream-enabled" name="enabled" <?= $siteMode === 'demo' ? 'disabled' : '' ?>><option value="0" <?= !$liveStreamEnabledValue ? 'selected' : '' ?>>Off — hide the button</option><option value="1" <?= $liveStreamEnabledValue ? 'selected' : '' ?>>On — show the button and player</option></select></div>
+                    <div class="field-group"><label for="live-stream-title">Broadcast title</label><input id="live-stream-title" name="title" maxlength="120" value="<?= yuc_e($liveStreamForm['title'] ?? 'Youth Unity Cup Live') ?>" placeholder="Youth Unity Cup Final" <?= $siteMode === 'demo' ? 'disabled' : '' ?>></div>
+                    <div class="field-group"><label for="live-stream-url">YouTube live or TikTok LIVE URL</label><input id="live-stream-url" name="url" type="url" inputmode="url" maxlength="500" value="<?= yuc_e($liveStreamForm['url'] ?? '') ?>" placeholder="https://www.youtube.com/live/VIDEO_ID" <?= $siteMode === 'demo' ? 'disabled' : '' ?>><small>Only HTTPS links from YouTube or TikTok are accepted. YouTube video-ID links and channel-ID /live links embed in-page; YouTube handle pages and TikTok LIVE open on their platform.</small></div>
+                    <div class="live-stream-autoplay-note"><strong>Autoplay behavior</strong><span>YouTube starts muted because browsers block most autoplay with sound. Viewers can unmute in the player. TikTok does not provide an official embeddable LIVE player, so its link opens TikTok directly.</span></div>
+                    <div class="form-actions"><a class="button button-quiet" href="/" target="_blank" rel="noopener noreferrer">Preview landing page ↗</a><button class="button button-primary" type="submit" <?= $siteMode === 'demo' ? 'disabled' : '' ?>>Save live settings</button></div>
+                </form>
+            </section>
+            <aside class="panel ops-table-panel live-stream-status-panel">
+                <div class="panel-kicker">PUBLIC PLAYER STATUS</div><h2><?= !empty($liveStreamSettings['enabled']) ? 'Watch live is ready' : 'No active broadcast' ?></h2>
+                <?php if (!empty($liveStreamSettings['enabled'])): ?>
+                    <span class="readiness-pill is-ready"><span></span>PUBLIC BUTTON ON</span>
+                    <p class="panel-intro"><strong><?= yuc_e($liveStreamSettings['title']) ?></strong><br><?= strtoupper(yuc_e($liveStreamSettings['platform'] ?? '')) ?> · <?= !empty($liveStreamSettings['can_embed']) ? 'autoplay player enabled' : 'external live link' ?></p>
+                    <a class="live-stream-external-link" href="<?= yuc_e($liveStreamSettings['url']) ?>" target="_blank" rel="noopener noreferrer">Open configured broadcast ↗</a>
+                <?php else: ?>
+                    <p class="panel-intro">The landing page Watch live button is hidden until you enable a supported broadcast link.</p>
+                <?php endif; ?>
+                <div class="live-stream-status-rule"></div>
+                <p class="live-stream-status-footnote">A YouTube player must be public or unlisted and allow embedding. Actual playback and audible sound are subject to the viewer’s browser and platform settings.</p>
+            </aside>
+        </div>
 
     <?php else: ?>
         <section class="panel settings-panel"><div class="panel-kicker">SITE OPERATIONS</div><h2>Site, email &amp; security</h2><p class="panel-intro">Keep public details current, tune failed-login protection, and manage the SMTP connection. Leave the SMTP password blank to retain the saved password.</p>

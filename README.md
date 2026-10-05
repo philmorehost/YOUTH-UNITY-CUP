@@ -49,6 +49,8 @@ Open `http://localhost:8080/`. The first request redirects to `/install`. Licens
 
 The worker processes up to 50 queued notifications per run. Each message is persisted before delivery, retries use backoff, and a message is marked failed after five attempts. SMTP settings and payment secrets are stored in `config/local.php`; restrict that file to the application user and back it up securely.
 
+System email is sent as a multipart plain-text/HTML message. The responsive HTML notification design uses Youth Unity Cup navy-and-lime matchday branding; the plain-text alternative remains available to email clients that do not display HTML.
+
 ## PayHub shop setup
 
 1. Create products, set NGN prices, enter available stock, and optionally upload a product image under **Admin → Shop products**. Product images may be JPEG, PNG, or WebP up to 8 MB; the server re-encodes them as WebP in protected storage. Product names, SKU, unit price, and quantity are revalidated server-side; order lines retain price/name snapshots.
@@ -65,6 +67,14 @@ The `/admin/orders` page catches shop-database query failures, logs the PDO SQLS
 
 Use **Admin → Homepage hero** to choose the default sports artwork, upload an image, add a YouTube link, or upload a short MP4/WebM loop. The settings reuse the existing `system_settings` table; uploads are validated, stored under protected `storage/hero/` (outside the public document root), and served through a narrow allow-listed route with byte-range support for video playback. Images are decoded, stripped of metadata, resized when oversized, and re-encoded as WebP. Uploads are limited to 10 MB for images and 25 MB for videos. MP4 files must have fast-start metadata (`moov` atom before media data); use web-optimized, muted 1080p clips for quick mobile starts. Uploaded videos autoplay muted, loop, and play inline. YouTube links are restricted to supported YouTube hosts and use a privacy-enhanced looping embed with autoplay muted.
 
+## Live stream and Watch live
+
+Use **Admin → Watch live** to enable or disable the landing-page button, set a broadcast title, and save an HTTPS YouTube or TikTok LIVE link. The settings reuse the existing `system_settings` table. Public/unlisted YouTube video-ID and channel-ID links are embedded responsively and start muted with autoplay requested; viewers can unmute in the player. Browser autoplay policies and YouTube embed permissions still apply. YouTube handle links can open externally.
+
+TikTok does not provide an official embeddable player for TikTok LIVE, so TikTok broadcasts appear as a secure external Watch on TikTok link instead of an in-page autoplay player. The admin form explains this behavior. The landing page only shows Watch live while a valid broadcast is enabled.
+
+## Product images
+
 Product images can be uploaded while the site is in Production under **Admin → Shop products**. JPEG, PNG, and WebP uploads are re-encoded, stripped of metadata, stored under protected `storage/shop-products/`, and served through a strict filename allow-list. On an existing installation, back up the configured database and run `php /absolute/path/to/YOUTH-UNITY-CUP/bin/migrate-schema.php` once before the first product-image upload.
 
 ## Demo and Production mode
@@ -76,7 +86,7 @@ Switching back to Production restores the exact saved tournament rows and IDs fr
 ## What is included
 
 - Clean-path front controller and a small PSR-4-style autoloader
-- `/admin/teams`, `/admin/players`, `/admin/venues`, `/admin/fixtures`, `/admin/registrations`, `/admin/transactions`, `/admin/products`, `/admin/orders`, `/admin/homepage-hero`, and `/admin/security` management with public `/teams`, `/team?id=<id>`, `/fixtures`, `/results`, `/venues`, and `/shop` pages
+- `/admin/teams`, `/admin/players`, `/admin/venues`, `/admin/fixtures`, `/admin/registrations`, `/admin/transactions`, `/admin/products`, `/admin/orders`, `/admin/homepage-hero`, `/admin/live-stream`, and `/admin/security` management with public `/teams`, `/team?id=<id>`, `/fixtures`, `/results`, `/venues`, and `/shop` pages
 - Four-group standings, match-centred fixtures/results, and team profile pages with squad numbers, player details, secure HTTPS headshot links, and local illustrated portrait fallbacks
 - Reversible Admin → Demo/Production control: atomically snapshots and restores only tournament content (teams, player rosters, venues, fixtures). Registrations, payment/shop records, admin accounts and security history are not deleted; live registration and checkout are paused during Demo mode.
 - Instant client-side admin search across teams, venues, fixtures/scores, registrations, transactions, shop products/orders, and blocked IPs; record controls are CSRF-protected and critical deletes require confirmation
@@ -93,7 +103,8 @@ Switching back to Production restores the exact saved tournament rows and IDs fr
 - Public `/shop` catalog and PayHub inline checkout; authoritative server-side status/reference/amount/currency verification, raw-body HMAC-signed webhook reconciliation, 20-minute inventory reservations, and order-status return page
 - Admin workflows to record non-gateway transaction events and queue notifications; public registration confirmation, review-status, and verified shop-payment notifications
 - SMTP over STARTTLS, implicit TLS, or an explicitly selected unencrypted transport; TLS peer checks are enabled
-- Responsive, full-bleed Youth Unity Cup landing page with admin-managed default/image/YouTube/video hero media, optimized private uploads and an automatically updating local-time year display
+- Responsive sports-notification emails with multipart plain-text and HTML alternatives, matchday branding, and safe content escaping
+- Responsive Youth Unity Cup landing page with admin-managed hero media, live YouTube autoplay player or TikTok LIVE link, and an automatically updating local-time year display
 
 ## Configuration and security notes
 
@@ -108,4 +119,4 @@ Switching back to Production restores the exact saved tournament rows and IDs fr
 
 ## Validation before release
 
-Run PHP's syntax checker on every PHP file, `php tests/schema-self-heal-smoke.php`, `php tests/payhub-security.php`, `php tests/hero-media-security.php`, `php tests/product-images-smoke.php`, `php tests/shop-template-smoke.php`, `php tests/admin-management-smoke.php`, and `php tests/public-tournament-smoke.php`; complete the installer against a disposable MySQL database, verify Demo → Production snapshot restoration on test data, test a successful SMTP message and the queued/retry path, and exercise PayHub inline checkout, a signed webhook, and server-side payment-return verification before production deployment. Test hero and product-image uploads, image replacement/retention, and browser rendering on the production-like web server. Never test schema changes or mode switching against the live tournament database.
+Run PHP's syntax checker on every PHP file, `php tests/schema-self-heal-smoke.php`, `php tests/payhub-security.php`, `php tests/hero-media-security.php`, `php tests/notification-email-smoke.php`, `php tests/live-stream-smoke.php`, `php tests/product-images-smoke.php`, `php tests/shop-template-smoke.php`, `php tests/admin-management-smoke.php`, and `php tests/public-tournament-smoke.php`; complete the installer against a disposable MySQL database, verify Demo → Production snapshot restoration on test data, test the responsive HTML email through SMTP and the queued/retry path, verify muted YouTube autoplay with an enabled public embed and the TikTok external-watch fallback, and exercise PayHub inline checkout, a signed webhook, and server-side payment-return verification before production deployment. Test hero and product-image uploads, image replacement/retention, and browser rendering on the production-like web server. Never test schema changes or mode switching against the live tournament database.

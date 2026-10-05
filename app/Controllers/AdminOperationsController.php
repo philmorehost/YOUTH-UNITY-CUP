@@ -13,6 +13,7 @@ use Yuc\Core\ConfigStore;
 use Yuc\Core\View;
 use Yuc\Services\EnvironmentModeService;
 use Yuc\Services\HeroService;
+use Yuc\Services\LiveStreamService;
 use Yuc\Services\PayHubClient;
 use Yuc\Services\ShopService;
 use Yuc\Services\TournamentService;
@@ -24,6 +25,7 @@ final class AdminOperationsController
     private PayHubClient $payHub;
     private EnvironmentModeService $environmentMode;
     private HeroService $hero;
+    private LiveStreamService $liveStream;
 
     /** @param array<string,mixed> $config */
     public function __construct(private PDO $pdo, private array $config)
@@ -33,13 +35,14 @@ final class AdminOperationsController
         $this->payHub = new PayHubClient($config);
         $this->environmentMode = new EnvironmentModeService($pdo);
         $this->hero = new HeroService($pdo);
+        $this->liveStream = new LiveStreamService($pdo);
     }
 
     public function manage(string $resource): void
     {
         $admin = $this->requireAdmin();
         $isDemoMode = $this->environmentMode->isDemo();
-        $allowed = ['teams', 'players', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'settings', 'homepage-hero', 'security', 'activity'];
+        $allowed = ['teams', 'players', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'settings', 'homepage-hero', 'live-stream', 'security', 'activity'];
         if (!in_array($resource, $allowed, true)) {
             http_response_code(404);
             View::render('not-found', ['title' => 'Not found · Youth Unity Cup']);
@@ -166,6 +169,7 @@ final class AdminOperationsController
 
         $settings = $resource === 'settings' ? $this->tournament->settings() : [];
         $heroSettings = $resource === 'homepage-hero' ? $this->hero->settings() : [];
+        $liveStreamSettings = $resource === 'live-stream' ? $this->liveStream->settings() : [];
         View::render('admin-manage', [
             'title' => ($resource === 'activity' ? 'Audit activity' : ($resource === 'homepage-hero' ? 'Homepage hero' : ucfirst($resource))) . ' · Youth Unity Cup Admin',
             'topNote' => 'ADMIN CONTROL ROOM',
@@ -181,6 +185,7 @@ final class AdminOperationsController
             'siteMode' => $isDemoMode ? 'demo' : 'production',
             'settings' => $settings,
             'heroSettings' => $heroSettings,
+            'liveStreamSettings' => $liveStreamSettings,
             'appTimezone' => (string) ($this->config['app']['timezone'] ?? 'UTC'),
             'mail' => is_array($this->config['mail'] ?? null) ? $this->config['mail'] : [],
             'payHubConfigured' => $this->payHub->isInlineConfigured(),
@@ -228,6 +233,9 @@ final class AdminOperationsController
             } elseif ($resource === 'orders') {
                 $this->shop->updateOrderDetails($values, (int) $admin['id']);
                 yuc_flash('success', 'Shop order customer and fulfillment details saved. Payment data was not changed.');
+            } elseif ($resource === 'live-stream') {
+                $this->liveStream->save($values, (int) $admin['id']);
+                yuc_flash('success', 'The public live-stream settings have been saved.');
             } elseif ($resource === 'security') {
                 $this->tournament->saveBlockedIp($values, (int) $admin['id']);
                 yuc_flash('success', 'The IP block was saved.');

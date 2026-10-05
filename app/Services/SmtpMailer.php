@@ -6,7 +6,7 @@ namespace Yuc\Services;
 
 use RuntimeException;
 
-/** A small SMTP transport for plain-text system notifications. */
+/** SMTP transport that sends responsive HTML and plain-text notification alternatives. */
 final class SmtpMailer
 {
     /** @param array<string,mixed> $settings */
@@ -43,6 +43,7 @@ final class SmtpMailer
             throw new RuntimeException('The SMTP server host is not valid.');
         }
 
+        $mimeMessage = $this->message($recipient, $fromEmail, $fromName, $subject, $body);
         $transport = $encryption === 'ssl' ? 'ssl://' : 'tcp://';
         $context = stream_context_create([
             'ssl' => [
@@ -94,7 +95,7 @@ final class SmtpMailer
             $this->command($socket, 'MAIL FROM:<' . $fromEmail . '>', [250]);
             $this->command($socket, 'RCPT TO:<' . $recipient . '>', [250, 251]);
             $this->command($socket, 'DATA', [354]);
-            $this->writeAll($socket, $this->message($recipient, $fromEmail, $fromName, $subject, $body));
+            $this->writeAll($socket, $mimeMessage);
             $this->expect($socket, [250]);
             $this->command($socket, 'QUIT', [221]);
         } finally {
@@ -164,6 +165,12 @@ final class SmtpMailer
         $safeFromName = '=?UTF-8?B?' . base64_encode($fromName) . '?=';
         $domain = substr(strrchr($fromEmail, '@') ?: '@youthunitycup.local', 1);
         $messageId = bin2hex(random_bytes(16)) . '@' . preg_replace('/[^A-Za-z0-9.-]/', '', $domain);
+        $boundary = '=_YUC_' . bin2hex(random_bytes(18));
+        $normalizedBody = str_replace(["\r\n", "\r"], "\n", $body);
+        $normalizedBody = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $normalizedBody) ?? '';
+        $htmlBody = (new NotificationEmailTemplate())->render($subject, $normalizedBody);
+        $plainPart = chunk_split(base64_encode($normalizedBody), 76, "\r\n");
+        $htmlPart = chunk_split(base64_encode($htmlBody), 76, "\r\n");
         $headers = [
             'Date: ' . gmdate('D, d M Y H:i:s') . ' +0000',
             'From: ' . $safeFromName . ' <' . $fromEmail . '>',
@@ -171,21 +178,19 @@ final class SmtpMailer
             'Subject: ' . $safeSubject,
             'Message-ID: <' . $messageId . '>',
             'MIME-Version: 1.0',
-            'Content-Type: text/plain; charset=UTF-8',
-            'Content-Transfer-Encoding: 8bit',
+            'Content-Type: multipart/alternative; boundary="' . $boundary . '"',
         ];
+        $mimeBody = '--' . $boundary . "\r\n"
+            . "Content-Type: text/plain; charset=UTF-8\r\n"
+            . "Content-Transfer-Encoding: base64\r\n\r\n"
+            . $plainPart . "\r\n"
+            . '--' . $boundary . "\r\n"
+            . "Content-Type: text/html; charset=UTF-8\r\n"
+            . "Content-Transfer-Encoding: base64\r\n\r\n"
+            . $htmlPart . "\r\n"
+            . '--' . $boundary . '--';
 
-        $normalizedBody = str_replace(["\r\n", "\r"], "\n", $body);
-        $normalizedBody = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $normalizedBody) ?? '';
-        $lines = explode("\n", $normalizedBody);
-        foreach ($lines as &$line) {
-            if (str_starts_with($line, '.')) {
-                $line = '.' . $line;
-            }
-        }
-        unset($line);
-
-        return implode("\r\n", $headers) . "\r\n\r\n" . implode("\r\n", $lines) . "\r\n.\r\n";
+        return implode("\r\n", $headers) . "\r\n\r\n" . $mimeBody . "\r\n.\r\n";
     }
 
     private function heloName(): string

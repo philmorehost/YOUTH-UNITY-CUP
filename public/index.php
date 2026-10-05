@@ -101,7 +101,7 @@ try {
             return $shopController;
         };
 
-        foreach (['teams', 'players', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'settings', 'homepage-hero', 'security', 'activity'] as $resource) {
+        foreach (['teams', 'players', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'settings', 'homepage-hero', 'live-stream', 'security', 'activity'] as $resource) {
             $router->get('/admin/' . $resource, static function () use ($getOperationsController, $resource): void {
                 $getOperationsController()->manage($resource);
             });
@@ -109,7 +109,7 @@ try {
         $router->post('/admin/orders/create', static function () use ($getOperationsController): void {
             $getOperationsController()->createOrder();
         });
-        foreach (['teams', 'players', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'security'] as $resource) {
+        foreach (['teams', 'players', 'venues', 'fixtures', 'registrations', 'transactions', 'products', 'orders', 'live-stream', 'security'] as $resource) {
             $router->post('/admin/' . $resource . '/save', static function () use ($getOperationsController, $resource): void {
                 $getOperationsController()->save($resource);
             });

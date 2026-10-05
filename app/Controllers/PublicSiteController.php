@@ -9,6 +9,7 @@ use Throwable;
 use Yuc\Core\View;
 use Yuc\Services\EnvironmentModeService;
 use Yuc\Services\HeroService;
+use Yuc\Services\LiveStreamService;
 use Yuc\Services\TournamentService;
 
 final class PublicSiteController
@@ -16,6 +17,7 @@ final class PublicSiteController
     private TournamentService $tournament;
     private EnvironmentModeService $environmentMode;
     private HeroService $hero;
+    private LiveStreamService $liveStream;
 
     /** @param array<string,mixed> $config */
     public function __construct(PDO $pdo, private array $config)
@@ -23,6 +25,7 @@ final class PublicSiteController
         $this->tournament = new TournamentService($pdo, $config);
         $this->environmentMode = new EnvironmentModeService($pdo);
         $this->hero = new HeroService($pdo);
+        $this->liveStream = new LiveStreamService($pdo);
     }
 
     public function home(): void
@@ -41,6 +44,7 @@ final class PublicSiteController
             'description' => 'The official Youth Unity Cup home for tournament news, teams, fixtures, results, venues, registration, and merchandise.',
             'siteTitle' => $siteTitle,
             'heroSettings' => $this->hero->settings(),
+            'liveStream' => $this->liveStream->settings(),
             'siteMode' => $this->environmentMode->currentMode(),
             'teamCount' => count($teams),
             'playerCount' => $playerCount,
