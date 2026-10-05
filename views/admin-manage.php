@@ -367,7 +367,7 @@ $venues = is_array($venues ?? null) ? $venues : [];
                 <div class="panel-kicker">MATCHDAY BROADCAST</div>
                 <h2>Configure Watch live</h2>
                 <p class="panel-intro">Add a YouTube or TikTok LIVE link. When enabled, the public landing page shows a Watch live button and opens the broadcast section.</p>
-                <?php if ($siteMode === 'demo'): ?><div class="alert alert-info" role="status"><span class="alert-icon" aria-hidden="true">i</span><p>Live-stream settings are read-only in Demo mode. Switch to Production to change the public broadcast.</p></div><?php endif; ?>
+                <?php if ($siteMode === 'demo'): ?><div class="alert alert-info" role="status"><span class="alert-icon" aria-hidden="true">i</span><p>Demo mode shows a fixed, read-only YouTube sample. This link is not saved to Production settings. Switch to Production to view or change the public broadcast.</p></div><?php endif; ?>
                 <form method="post" action="/admin/live-stream/save" class="form-stack">
                     <?= yuc_csrf_field() ?>
                     <div class="field-group"><label for="live-stream-enabled">Watch live button</label><select id="live-stream-enabled" name="enabled" <?= $siteMode === 'demo' ? 'disabled' : '' ?>><option value="0" <?= !$liveStreamEnabledValue ? 'selected' : '' ?>>Off — hide the button</option><option value="1" <?= $liveStreamEnabledValue ? 'selected' : '' ?>>On — show the button and player</option></select></div>

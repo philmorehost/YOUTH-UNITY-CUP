@@ -10,8 +10,24 @@ use Throwable;
 
 final class LiveStreamService
 {
+    private const DEMO_STREAM_URL = 'https://youtu.be/L3374C3OyrY';
+
     public function __construct(private PDO $pdo)
     {
+    }
+
+    /** @return array{enabled:bool,title:string,url:string,platform:string,embed_url:string,can_embed:bool} */
+    public static function demoSettings(): array
+    {
+        $resolved = self::inspectUrl(self::DEMO_STREAM_URL);
+        return [
+            'enabled' => true,
+            'title' => 'Youth Unity Cup Demo Broadcast',
+            'url' => $resolved['url'],
+            'platform' => $resolved['platform'],
+            'embed_url' => $resolved['embed_url'],
+            'can_embed' => $resolved['embed_url'] !== '',
+        ];
     }
 
     /** @return array{enabled:bool,title:string,url:string,platform:string,embed_url:string,can_embed:bool} */

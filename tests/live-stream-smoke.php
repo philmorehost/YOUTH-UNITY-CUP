@@ -16,6 +16,10 @@ function expectLiveStream(bool $condition, string $message): void
 
 $video = LiveStreamService::inspectUrl('https://youtu.be/dQw4w9WgXcQ?share=1');
 expectLiveStream($video['platform'] === 'youtube', 'YouTube video link was not identified.');
+
+$demoStream = LiveStreamService::demoSettings();
+expectLiveStream($demoStream['enabled'] && $demoStream['title'] === 'Youth Unity Cup Demo Broadcast', 'The demo broadcast should be enabled with a clear demo title.');
+expectLiveStream($demoStream['url'] === 'https://www.youtube.com/watch?v=L3374C3OyrY' && str_contains($demoStream['embed_url'], '/embed/L3374C3OyrY?autoplay=1&mute=1'), 'The supplied YouTube link was not normalized into the demo player.');
 expectLiveStream($video['url'] === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'YouTube links should be canonicalized before being stored.');
 expectLiveStream(str_contains($video['embed_url'], 'youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&playsinline=1'), 'YouTube player URL must request muted inline autoplay.');
 
@@ -47,7 +51,7 @@ foreach ([
     expectLiveStream($rejected, 'Unsupported or unsafe live-stream URL was accepted: ' . $invalidUrl);
 }
 
-function renderPublicHomeForLiveStream(array $liveStream): string
+function renderPublicHomeForLiveStream(array $liveStream, string $siteMode = 'production'): string
 {
     ob_start();
     View::render('public-home', [
@@ -58,7 +62,7 @@ function renderPublicHomeForLiveStream(array $liveStream): string
         'siteTitle' => 'Youth Unity Cup',
         'heroSettings' => ['type' => 'default'],
         'liveStream' => $liveStream,
-        'siteMode' => 'production',
+        'siteMode' => $siteMode,
         'teamCount' => 16,
         'playerCount' => 176,
         'fixtureCount' => 24,
@@ -79,6 +83,10 @@ $youtubeHome = renderPublicHomeForLiveStream([
 expectLiveStream(str_contains($youtubeHome, 'class="button button-live"') && str_contains($youtubeHome, 'href="#live-stream"'), 'The landing hero is missing the Watch live button.');
 expectLiveStream(str_contains($youtubeHome, 'id="live-stream"') && str_contains($youtubeHome, 'loading="eager"'), 'The public landing page should load the live player immediately.');
 expectLiveStream(str_contains($youtubeHome, 'autoplay=1&amp;mute=1') && str_contains($youtubeHome, 'allow="autoplay;'), 'The YouTube embed does not request browser-permitted muted autoplay.');
+
+$demoHome = renderPublicHomeForLiveStream($demoStream, 'demo');
+expectLiveStream(str_contains($demoHome, 'DEMO MODE') && str_contains($demoHome, 'Youth Unity Cup Demo Broadcast'), 'The Demo landing page should show its read-only broadcast.');
+expectLiveStream(str_contains($demoHome, 'href="#live-stream"') && str_contains($demoHome, 'youtube-nocookie.com/embed/L3374C3OyrY'), 'The Demo landing page should offer and embed the configured sample video.');
 
 $tiktokHome = renderPublicHomeForLiveStream([
     'enabled' => true,
@@ -127,4 +135,40 @@ $adminHtml = (string) ob_get_clean();
 expectLiveStream(str_contains($adminHtml, 'Watch live') && str_contains($adminHtml, 'name="enabled"') && str_contains($adminHtml, $video['url']), 'The admin live-stream form did not render configured broadcast settings.');
 expectLiveStream(str_contains($adminHtml, 'starts muted') && str_contains($adminHtml, 'TikTok does not provide an official embeddable LIVE player'), 'The admin page does not explain the player/autoplay behavior.');
 
-fwrite(STDOUT, "Live-stream validation, admin controls, and responsive landing-page playback checks passed." . PHP_EOL);
+ob_start();
+View::render('admin-manage', [
+    'title' => 'Watch live · Youth Unity Cup Admin',
+    'topNote' => 'ADMIN CONTROL ROOM',
+    'bodyClass' => 'admin-page',
+    'admin' => ['id' => 1, 'email' => 'admin@example.test', 'username' => 'admin'],
+    'resource' => 'live-stream',
+    'rows' => [],
+    'formValues' => [],
+    'liveStreamSettings' => $demoStream,
+    'siteMode' => 'demo',
+    'orderProducts' => [],
+    'teams' => [],
+    'venues' => [],
+    'settings' => [],
+    'mail' => [],
+    'payHubConfigured' => true,
+    'appTimezone' => 'Africa/Lagos',
+    'flash' => null,
+    'auditTotal' => 0,
+    'auditPage' => 1,
+    'auditPages' => 1,
+    'auditSearch' => '',
+    'auditCategory' => '',
+]);
+$demoAdminHtml = (string) ob_get_clean();
+expectLiveStream(str_contains($demoAdminHtml, 'fixed, read-only YouTube sample') && str_contains($demoAdminHtml, 'not saved to Production settings') && str_contains($demoAdminHtml, $demoStream['url']), 'Admin Demo mode should display the sample link as read-only.');
+expectLiveStream(str_contains($demoAdminHtml, 'name="url" type="url" inputmode="url" maxlength="500" value="' . $demoStream['url'] . '" placeholder="https://www.youtube.com/live/VIDEO_ID" disabled'), 'The demo YouTube URL should be displayed in a disabled, read-only field.');
+expectLiveStream(str_contains($demoAdminHtml, 'Save live settings</button>') && preg_match('/<button class="button button-primary" type="submit" disabled>Save live settings<\/button>/', $demoAdminHtml) === 1, 'Saving the demo broadcast must be disabled in Demo mode.');
+
+$publicControllerSource = file_get_contents(dirname(__DIR__) . '/app/Controllers/PublicSiteController.php');
+$adminOperationsSource = file_get_contents(dirname(__DIR__) . '/app/Controllers/AdminOperationsController.php');
+expectLiveStream(is_string($publicControllerSource) && str_contains($publicControllerSource, "? LiveStreamService::demoSettings()"), 'The public site should use the demo-only stream override while Demo mode is active.');
+expectLiveStream(is_string($adminOperationsSource) && str_contains($adminOperationsSource, ': ($isDemoMode ? LiveStreamService::demoSettings() : $this->liveStream->settings())'), 'The admin Demo view should read its sample link without loading Production settings.');
+expectLiveStream(is_string($adminOperationsSource) && str_contains($adminOperationsSource, 'guardDemoWrite($resource'), 'Admin save operations must remain protected by the Demo-mode write guard.');
+
+fwrite(STDOUT, "Live-stream validation, read-only Demo playback, admin controls, and responsive landing-page checks passed." . PHP_EOL);

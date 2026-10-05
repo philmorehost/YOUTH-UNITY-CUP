@@ -73,6 +73,8 @@ Use **Admin → Watch live** to enable or disable the landing-page button, set a
 
 TikTok does not provide an official embeddable player for TikTok LIVE, so TikTok broadcasts appear as a secure external Watch on TikTok link instead of an in-page autoplay player. The admin form explains this behavior. The landing page only shows Watch live while a valid broadcast is enabled.
 
+Demo mode shows the read-only sample broadcast [https://youtu.be/L3374C3OyrY](https://youtu.be/L3374C3OyrY). It is generated as a demo-only setting rather than saved to `system_settings`, so the production broadcast settings remain unchanged when switching between Demo and Production. The demo admin form displays this sample link with editing and saving disabled.
+
 ## Product images
 
 Product images can be uploaded while the site is in Production under **Admin → Shop products**. JPEG, PNG, and WebP uploads are re-encoded, stripped of metadata, stored under protected `storage/shop-products/`, and served through a strict filename allow-list. On an existing installation, back up the configured database and run `php /absolute/path/to/YOUTH-UNITY-CUP/bin/migrate-schema.php` once before the first product-image upload.

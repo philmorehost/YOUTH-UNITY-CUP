@@ -30,6 +30,10 @@ final class PublicSiteController
 
     public function home(): void
     {
+        $siteMode = $this->environmentMode->currentMode();
+        $liveStreamSettings = $siteMode === 'demo'
+            ? LiveStreamService::demoSettings()
+            : $this->liveStream->settings();
         $settings = $this->tournament->settings();
         $teams = $this->tournament->publicTeams();
         $upcoming = $this->tournament->fixtures('upcoming');
@@ -44,8 +48,8 @@ final class PublicSiteController
             'description' => 'The official Youth Unity Cup home for tournament news, teams, fixtures, results, venues, registration, and merchandise.',
             'siteTitle' => $siteTitle,
             'heroSettings' => $this->hero->settings(),
-            'liveStream' => $this->liveStream->settings(),
-            'siteMode' => $this->environmentMode->currentMode(),
+            'liveStream' => $liveStreamSettings,
+            'siteMode' => $siteMode,
             'teamCount' => count($teams),
             'playerCount' => $playerCount,
             'fixtureCount' => count($upcoming),

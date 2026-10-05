@@ -159,7 +159,10 @@ final class AdminOperationsController
         }
 
         $old = $_SESSION['_old_form'] ?? [];
-        if (is_array($old) && ($old['resource'] ?? '') === $resource && is_array($old['values'] ?? null)) {
+        if (is_array($old)
+            && ($old['resource'] ?? '') === $resource
+            && is_array($old['values'] ?? null)
+            && !($isDemoMode && $resource === 'live-stream')) {
             $formValues = $old['values'];
         }
         unset($_SESSION['_old_form']);
@@ -169,7 +172,9 @@ final class AdminOperationsController
 
         $settings = $resource === 'settings' ? $this->tournament->settings() : [];
         $heroSettings = $resource === 'homepage-hero' ? $this->hero->settings() : [];
-        $liveStreamSettings = $resource === 'live-stream' ? $this->liveStream->settings() : [];
+        $liveStreamSettings = $resource !== 'live-stream'
+            ? []
+            : ($isDemoMode ? LiveStreamService::demoSettings() : $this->liveStream->settings());
         View::render('admin-manage', [
             'title' => ($resource === 'activity' ? 'Audit activity' : ($resource === 'homepage-hero' ? 'Homepage hero' : ucfirst($resource))) . ' · Youth Unity Cup Admin',
             'topNote' => 'ADMIN CONTROL ROOM',
