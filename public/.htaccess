@@ -1,0 +1,11 @@
+Options -Indexes -MultiViews
+RewriteEngine On
+
+# The application front controller handles clean URLs; existing public assets are served directly.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
+
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
